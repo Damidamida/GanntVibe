@@ -11,30 +11,6 @@ interface Props {
   fromIndex: number;
   toIndex: number;
   rowHeight: number;
-<<<<<<< HEAD
-  headerOffset: number;
-}
-
-export const TaskDependencyLine: React.FC<Props> = ({
-  dependency, fromTask, toTask, projectStartDate, dayWidth, fromIndex, toIndex, rowHeight, headerOffset
-}) => {
-  const fromX = differenceInDays(fromTask.endDate, projectStartDate) * dayWidth;
-  const toX = differenceInDays(toTask.startDate, projectStartDate) * dayWidth;
-  const y1 = headerOffset + fromIndex * rowHeight + rowHeight / 2;
-  const y2 = headerOffset + toIndex * rowHeight + rowHeight / 2;
-
-  const midX = (fromX + toX) / 2;
-  const path = `M ${fromX} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${toX} ${y2}`;
-
-  return (
-    <svg className="absolute inset-0 pointer-events-none overflow-visible">
-      <defs>
-        <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-          <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
-        </marker>
-      </defs>
-      <path d={path} fill="none" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#arrow)" />
-=======
   selected?: boolean;
   onSelect?: (id: string) => void;
 }
@@ -51,7 +27,6 @@ export const TaskDependencyLine: React.FC<Props> = ({
   selected,
   onSelect,
 }) => {
-  // Geometry
   const xFrom = (differenceInDays(fromTask.endDate, projectStartDate) + 1) * dayWidth;
   const xTo = differenceInDays(toTask.startDate, projectStartDate) * dayWidth;
   const yFrom = fromIndex * rowHeight + rowHeight / 2;
@@ -86,8 +61,6 @@ export const TaskDependencyLine: React.FC<Props> = ({
 
   const stroke = selected ? '#ef4444' : 'rgba(75,85,99,0.9)';
   const strokeWidth = selected ? 2.5 : 2;
-
-  // Arrow
   const AR = 6;
   const arrow = `${xTo},${yTo} ${xTo - AR},${yTo - AR} ${xTo - AR},${yTo + AR}`;
 
@@ -96,7 +69,6 @@ export const TaskDependencyLine: React.FC<Props> = ({
     onSelect && onSelect(dependency.id);
   };
 
-  // Container SVG ignores events; only shapes receive them — so stacked lines don't eat each other
   return (
     <svg className="absolute inset-0 w-full h-full" style={{ pointerEvents: 'none' }}>
       <polyline
@@ -131,7 +103,6 @@ export const TaskDependencyLine: React.FC<Props> = ({
         style={{ pointerEvents: 'all', cursor: 'pointer' }}
         onClick={handleClick}
       />
->>>>>>> fb11fd0 (chore: initial commit)
     </svg>
   );
 };
