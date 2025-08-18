@@ -64,6 +64,7 @@ export const TaskList: React.FC<TaskListProps> = ({
               className="p-1 rounded hover:bg-accent"
               onClick={(e) => { e.stopPropagation(); onToggleCollapse(t.id, !(t as any).isCollapsed); }}
               title={(t as any).isCollapsed ? 'Развернуть' : 'Свернуть'}
+              aria-label="Toggle collapse"
             >
               {(t as any).isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </button>
@@ -89,7 +90,7 @@ export const TaskList: React.FC<TaskListProps> = ({
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="p-1 rounded hover:bg-accent justify-self-end" title="Действия">
+                <button className="p-1 rounded hover:bg-accent justify-self-end" title="Действия" aria-haspopup="menu">
                   <MoreHorizontal className="w-4 h-4" />
                 </button>
               </DropdownMenuTrigger>
@@ -140,7 +141,7 @@ export const TaskList: React.FC<TaskListProps> = ({
 
           {/* Add subtask inline */}
           {addingSubParent === t.id && !(t as any).isCollapsed && (
-            <div className="flex items-center gap-2 border-b" style={{ height: rowHeight, paddingLeft: '28px' }}>
+            <div className="flex items-center gap-2 border-b relative" style={{ height: rowHeight, paddingLeft: '28px' }}>
               <span className="absolute left-3 top-0 bottom-0 w-px bg-border pointer-events-none" />
               <Input
                 autoFocus
@@ -165,7 +166,7 @@ export const TaskList: React.FC<TaskListProps> = ({
 
           {/* Quick add subtask button */}
           {!(t as any).isCollapsed && (
-            <div className="py-1" style={{ paddingLeft: '28px' }}>
+            <div className="flex items-center" style={{ height: rowHeight, paddingLeft: '28px' }}>
               <Button variant="ghost" size="sm" onClick={() => setAddingSubParent(t.id)}>
                 <Plus className="w-4 h-4 mr-1" /> Добавить подзадачу
               </Button>
@@ -183,29 +184,29 @@ export const TaskList: React.FC<TaskListProps> = ({
       ))}
 
       {/* Add task at bottom */}
-      <div className="py-2">
-        {addingTask ? (
-          <div className="flex items-center gap-2">
-            <Input
-              autoFocus
-              placeholder="Название задачи"
-              value={newTaskName}
-              onChange={e => setNewTaskName(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && newTaskName.trim()) { onCreateTask(newTaskName.trim()); setNewTaskName(''); setAddingTask(false); }
-                if (e.key === 'Escape') { setNewTaskName(''); setAddingTask(false); }
-              }}
-            />
-            <Button onClick={() => { if (newTaskName.trim()) { onCreateTask(newTaskName.trim()); setNewTaskName(''); setAddingTask(false); } }}>
-              Добавить
-            </Button>
-          </div>
-        ) : (
+      {addingTask ? (
+        <div className="flex items-center gap-2" style={{ height: rowHeight }}>
+          <Input
+            autoFocus
+            placeholder="Название задачи"
+            value={newTaskName}
+            onChange={e => setNewTaskName(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && newTaskName.trim()) { onCreateTask(newTaskName.trim()); setNewTaskName(''); setAddingTask(false); }
+              if (e.key === 'Escape') { setNewTaskName(''); setAddingTask(false); }
+            }}
+          />
+          <Button onClick={() => { if (newTaskName.trim()) { onCreateTask(newTaskName.trim()); setNewTaskName(''); setAddingTask(false); } }}>
+            Добавить
+          </Button>
+        </div>
+      ) : (
+        <div className="flex items-center" style={{ height: rowHeight }}>
           <Button variant="ghost" onClick={() => setAddingTask(true)}>
             <Plus className="w-4 h-4 mr-1" /> Добавить задачу
           </Button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 };

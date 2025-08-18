@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Task, TaskDependency } from '../types/gantt';
 import { differenceInDays } from '../utils/dateUtils';
 
@@ -27,82 +27,49 @@ export const TaskDependencyLine: React.FC<Props> = ({
   selected,
   onSelect,
 }) => {
-  const xFrom = (differenceInDays(fromTask.endDate, projectStartDate) + 1) * dayWidth;
-  const xTo = differenceInDays(toTask.startDate, projectStartDate) * dayWidth;
-  const yFrom = fromIndex * rowHeight + rowHeight / 2;
-  const yTo = toIndex * rowHeight + rowHeight / 2;
+  const points = useMemo(() => {
+    const yFrom = fromIndex * rowHeight + rowHeight / 2;
+    const yTo = toIndex * rowHeight + rowHeight / 2;
 
-  const H_GAP = 12;
-  const L = xFrom + H_GAP;
-  const R = xTo - H_GAP;
+    const xFromLeft = differenceInDays(fromTask.startDate, projectStartDate) * dayWidth;
+    const xFromRight = (differenceInDays(fromTask.endDate, projectStartDate) + 1) * dayWidth;
 
-  let points: Array<[number, number]> = [];
-  if (L <= R) {
-    const midY = (yFrom + yTo) / 2;
-    points = [
-      [xFrom, yFrom],
-      [L, yFrom],
-      [L, midY],
-      [R, midY],
-      [R, yTo],
-      [xTo, yTo],
-    ];
-  } else {
-    const midX = (xFrom + xTo) / 2;
-    points = [
-      [xFrom, yFrom],
-      [xFrom + H_GAP, yFrom],
-      [midX, yFrom],
-      [midX, yTo],
-      [xTo - H_GAP, yTo],
-      [xTo, yTo],
-    ];
-  }
+    const xToLeft = differenceInDays(toTask.startDate, projectStartDate) * dayWidth;
+    // Стратегия FS: выходим из правого края источника, зазор 6px, затем «манхэттеном» к левому краю цели
+    const gap = 6;
+    const x1 = xFromRight;               // старт по X
+    const x2 = x1 + gap;                  // небольшой отход вправо
+    const yMid = yTo;                     // вертикальная цель
+    const x3 = xToLeft - gap;             // подходим к цели слева
+    const x4 = xToLeft;                   // входим в цель
 
-  const stroke = selected ? '#ef4444' : 'rgba(75,85,99,0.9)';
-  const strokeWidth = selected ? 2.5 : 2;
-  const AR = 6;
-  const arrow = `${xTo},${yTo} ${xTo - AR},${yTo - AR} ${xTo - AR},${yTo + AR}`;
+    return { x1, x2, x3, x4, yFrom, yMid, yTo };
+  }, [fromTask, toTask, projectStartDate, dayWidth, fromIndex, toIndex, rowHeight]);
 
-  const handleClick: React.MouseEventHandler<SVGElement> = (e) => {
+  const color = selected ? '#0ea5e9' : '#94a3b8';
+  const strokeW = selected ? 2.5 : 1.5;
+
+  const handleClick: React.MouseEventHandler<SVGPathElement | SVGLineElement> = (e) => {
     e.stopPropagation();
     onSelect && onSelect(dependency.id);
   };
 
   return (
-    <svg className="absolute inset-0 w-full h-full" style={{ pointerEvents: 'none' }}>
-      <polyline
-        points={points.map(([x,y]) => `${x},${y}`).join(' ')}
-        fill="none"
-        stroke={stroke}
-        strokeWidth={strokeWidth}
-        strokeLinejoin="miter"
-        strokeLinecap="square"
-        style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
-        onClick={handleClick}
-      />
-      <polygon
-        points={arrow}
-        fill={stroke}
-        style={{ pointerEvents: 'all', cursor: 'pointer' }}
-        onClick={handleClick}
-      />
-      <polyline
-        points={points.map(([x,y]) => `${x},${y}`).join(' ')}
-        fill="none"
-        stroke="transparent"
-        strokeWidth={12}
-        style={{ pointerEvents: 'stroke' }}
-        onClick={handleClick}
-      />
-      <circle
-        cx={xTo}
-        cy={yTo}
-        r={10}
-        fill="transparent"
-        style={{ pointerEvents: 'all', cursor: 'pointer' }}
-        onClick={handleClick}
-      />
+    <svg className="absolute left-0 top-0 pointer-events-none" style={{ width: '100%', height: '100%', overflow: 'visible', zIndex: 5 }}>
+      <defs>
+        <marker id="arrow" markerWidth="10" markerHeight="7" refX="8" refY="3.5" orient="auto" markerUnits="strokeWidth">
+          <polygon points="0 0, 10 3.5, 0 7" fill={color} />
+        </marker>
+      </defs>
+
+      {/* Горизонталь от правого края источника */}
+      <line x1={points.x1} y1={points.yFrom} x2={points.x2} y2={points.yFrom} stroke={color} strokeWidth={strokeW} className="pointer-events-auto" onClick={handleClick} />
+      {/* Вертикаль к строке цели */}
+      <line x1={points.x2} y1={points.yFrom} x2={points.x2} y2={points.yMid} stroke={color} strokeWidth={strokeW} className="pointer-events-auto" onClick={handleClick} />
+      {/* Горизонталь к левому краю цели со стрелкой */}
+      <line x1={points.x2} y1={points.yTo} x2={points.x4} y2={points.yTo} stroke={color} strokeWidth={strokeW} markerEnd="url(#arrow)" className="pointer-events-auto" onClick={handleClick} />
     </svg>
   );
 };
+
+export default TaskDependencyLine;

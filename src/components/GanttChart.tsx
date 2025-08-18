@@ -21,7 +21,10 @@ const HEADER_HEIGHT = 49;
 type LayoutRow =
   | { kind: 'task'; task: Task }
   | { kind: 'addSub'; parentId: string }
+  | { kind: 'milestone'; milestone: Milestone }
   | { kind: 'addTask' };
+
+const parentKey = (t: Task) => (t as any).parentId ?? '__root__';
 
 export const GanttChart: React.FC<Props> = ({
   project,
@@ -36,7 +39,54 @@ export const GanttChart: React.FC<Props> = ({
 
   const dayWidth = DAY_WIDTHS[unit];
 
-  // Map parent -> children (sorted)
+  // --- One-time migration: ensure every task has orderIndex within its parent group ---
+  const didMigrateRef = useRef(false);
+  useEffect(() => {
+    if (didMigrateRef.current) return;
+    const tasks = [...project.tasks];
+    let changed = false;
+
+    // group by parent
+    const groups = new Map<string, Task[]>();
+    for (const t of tasks) {
+      const key = parentKey(t);
+      const arr = groups.get(key) || [];
+      arr.push(t);
+      groups.set(key, arr);
+    }
+
+    // within each group, assign orderIndex if missing, preserving current relative order
+    for (const [key, arr] of groups) {
+      // preserve existing explicit orderIndex; otherwise keep current appearance order
+      // sort by existing orderIndex first to stabilize legacy inconsistent values
+      const hasAny = arr.some(t => (t as any).orderIndex !== undefined && (t as any).orderIndex !== null);
+      let sorted = arr.slice();
+      if (hasAny) {
+        sorted.sort((a,b) => {
+          const ai = (a as any).orderIndex;
+          const bi = (b as any).orderIndex;
+          if (ai == null && bi == null) return 0;
+          if (ai == null) return 1;
+          if (bi == null) return -1;
+          return ai - bi;
+        });
+      }
+      sorted.forEach((t, i) => {
+        if ((t as any).orderIndex == null || Number.isNaN((t as any).orderIndex)) {
+          (t as any).orderIndex = i;
+          changed = true;
+        }
+      });
+    }
+
+    if (changed) {
+      onUpdateProject({ ...project, tasks });
+    }
+    didMigrateRef.current = true;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Map parent -> children (sorted ONLY by orderIndex)
   const childrenByParent = useMemo(() => {
     const map = new Map<string, Task[]>();
     for (const t of project.tasks) {
@@ -48,18 +98,23 @@ export const GanttChart: React.FC<Props> = ({
       }
     }
     for (const [k, arr] of map) {
-      arr.sort((a,b) => ((a.orderIndex ?? 0) - (b.orderIndex ?? 0)) || a.startDate.getTime() - b.startDate.getTime());
+      arr.sort((a,b) => ((a as any).orderIndex ?? 0) - ((b as any).orderIndex ?? 0));
     }
     return map;
   }, [project.tasks]);
 
-  // Visible layout rows = задачи + (если раскрыт) подзадачи + строка "Добавить подзадачу" под родителем + в конце "Добавить задачу"
+  // Roots strictly by orderIndex
+  const roots = useMemo(() => {
+    return project.tasks
+      .filter(t => !(t as any).parentId)
+      .slice()
+      .sort((a,b) => ((a as any).orderIndex ?? 0) - ((b as any).orderIndex ?? 0));
+  }, [project.tasks]);
+
+  // Visible layout rows
   const layoutRows: LayoutRow[] = useMemo(() => {
-    const byId = new Map(project.tasks.map(t => [t.id, t]));
-    const order = project.tasks.map(t => t.id).filter(id => !byId.get(id)?.parentId);
     const rows: LayoutRow[] = [];
-    for (const id of order) {
-      const root = byId.get(id)!;
+    for (const root of roots) {
       rows.push({ kind: 'task', task: root });
       if (!(root as any).isCollapsed) {
         const kids = childrenByParent.get(root.id) || [];
@@ -67,11 +122,12 @@ export const GanttChart: React.FC<Props> = ({
         rows.push({ kind: 'addSub', parentId: root.id });
       }
     }
+    for (const m of project.milestones || []) rows.push({ kind: 'milestone', milestone: m });
     rows.push({ kind: 'addTask' });
     return rows;
-  }, [project.tasks, childrenByParent]);
+  }, [roots, project.milestones, childrenByParent]);
 
-  // Быстрые словари
+  // indices
   const taskRowIndex: Record<string, number> = useMemo(() => {
     const map: Record<string, number> = {};
     layoutRows.forEach((r, i) => { if (r.kind === 'task') map[r.task.id] = i; });
@@ -95,18 +151,17 @@ export const GanttChart: React.FC<Props> = ({
     }
     for (const m of milestones) {
       if (!minStart || m.date < minStart) minStart = m.date;
-      if (!maxEnd || m.date > maxEnd) maxEnd = m.date;
     }
 
     let s: Date;
-    let e: Date;
-    if (!minStart || !maxEnd) {
+    if (!minStart) {
       s = addDays(today, -60);
-      e = addDays(today, 30);
     } else {
       s = addDays(minStart, -60);
-      e = addDays(maxEnd, 7);
     }
+
+    // fixed right edge: 31.12.2030
+    const e = new Date(2030, 11, 31);
 
     const days = Math.max(1, differenceInDays(e, s));
     return { start: s, end: e, totalDays: days };
@@ -114,7 +169,7 @@ export const GanttChart: React.FC<Props> = ({
 
   const contentWidth = totalDays * dayWidth;
 
-  // --- Сохранение положения при сдвиге дат ---
+  // --- keep scroll position after date shifts ---
   const snapshotLeftRef = useRef<number>(0);
   const snapshotStartRef = useRef<Date | null>(null);
   const needCompensateRef = useRef<boolean>(false);
@@ -142,7 +197,6 @@ export const GanttChart: React.FC<Props> = ({
     onUpdateProject({ ...project, tasks });
   };
 
-  // Зависимости
   const addDependency = (fromId: string, toId: string) => {
     if (fromId === toId) return;
     const deps = project.dependencies || [];
@@ -206,7 +260,6 @@ export const GanttChart: React.FC<Props> = ({
     }
   };
 
-  // Удаление выбранной зависимости по Delete/Backspace
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!selectedDepId) return;
@@ -236,6 +289,16 @@ export const GanttChart: React.FC<Props> = ({
     document.addEventListener('mouseup', onUp);
   };
 
+  // helpers to compute next orderIndex
+  const nextIndexForRoot = () => {
+    const roots = project.tasks.filter(t => !(t as any).parentId);
+    return Math.max(-1, ...roots.map(t => (t as any).orderIndex ?? -1)) + 1;
+  };
+  const nextIndexForParent = (parentId: string) => {
+    const kids = project.tasks.filter(t => (t as any).parentId === parentId);
+    return Math.max(-1, ...kids.map(t => (t as any).orderIndex ?? -1)) + 1;
+  };
+
   return (
     <div className="h-full w-full flex">
       {/* Левая панель */}
@@ -254,18 +317,38 @@ export const GanttChart: React.FC<Props> = ({
           onDeleteMilestone={id =>
             onUpdateProject({ ...project, milestones: project.milestones.filter(m => m.id !== id) })
           }
-          onReorderTasks={newTasks => onUpdateProject({ ...project, tasks: newTasks })}
+          onReorderTasks={newTasks => {
+            // если когда-то включим DnD слева — пересчитаем orderIndex в каждой группе
+            const tasks = [...project.tasks];
+            const byId = new Map(tasks.map(t => [t.id, t]));
+            // собрать группы из newTasks по parentId
+            const groups = new Map<string, Task[]>();
+            for (const t of newTasks) {
+              const orig = byId.get(t.id);
+              if (!orig) continue;
+              const key = parentKey(orig);
+              const arr = groups.get(key) || [];
+              arr.push(orig);
+              groups.set(key, arr);
+            }
+            for (const [key, arr] of groups) {
+              arr.forEach((t, i) => ((t as any).orderIndex = i));
+            }
+            onUpdateProject({ ...project, tasks });
+          }}
           rowHeight={ROW_HEIGHT}
           onFocusTask={focusTask}
           onCreateTask={(name) => {
             const today = new Date();
             const t: Task = { id: 't-' + Math.random().toString(36).slice(2), name, startDate: today, endDate: addDays(today, 5), progress: 0, priority: 1, assignee: '', color: '#4f46e5' };
+            (t as any).orderIndex = nextIndexForRoot();
             onUpdateProject({ ...project, tasks: [...project.tasks, t] });
           }}
           onCreateSubtask={(parentId, name) => {
             const today = new Date();
             const st = today; const en = addDays(today, 5);
             const t: Task = { id: 't-' + Math.random().toString(36).slice(2), name, startDate: st, endDate: en, progress: 0, priority: 1, assignee: '', color: '#10b981', parentId } as any;
+            (t as any).orderIndex = nextIndexForParent(parentId);
             const parentIdx = project.tasks.findIndex(x => x.id === parentId);
             const parent = parentIdx >=0 ? project.tasks[parentIdx] : undefined;
             const updatedParent = parent ? { ...parent, isCollapsed: false } : undefined;
