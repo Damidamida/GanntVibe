@@ -1,6 +1,9 @@
 export type TimelineUnit = 'day' | 'week' | 'month';
 
 export interface Task {
+  parentId?: string | null;
+  orderIndex?: number;
+  isCollapsed?: boolean;
   id: string;
   name: string;
   startDate: Date;
