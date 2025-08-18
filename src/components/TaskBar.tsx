@@ -4,6 +4,7 @@ import { addDays, differenceInDays } from '../utils/dateUtils';
 
 interface Props {
   task: Task;
+  asThinLine?: boolean;
   projectStartDate: Date;
   dayWidth: number;
   rowHeight: number;
@@ -41,6 +42,7 @@ function shadeHexColor(hex: string, percent: number): string {
 
 export const TaskBar: React.FC<Props> = ({
   task,
+  asThinLine = false,
   projectStartDate,
   dayWidth,
   rowHeight,
@@ -52,6 +54,9 @@ export const TaskBar: React.FC<Props> = ({
   onDragChange,
 }) => {
   const [hover, setHover] = useState(false);
+  const barHeight = Math.max(4, rowHeight * (asThinLine ? 0.2 : 0.9));
+  const barTopOffset = (rowHeight - barHeight) / 2;
+
 
   const [dragging, setDragging] = useState<null | 'move' | 'resize-left' | 'resize-right'>(null);
   const [dragStartX, setDragStartX] = useState(0);
@@ -291,7 +296,7 @@ export const TaskBar: React.FC<Props> = ({
       <div
         ref={barRef}
         className="absolute h-full rounded shadow-sm cursor-grab active:cursor-grabbing"
-        style={{ left: OUT, width, top: 0, background: fill, border: '1px solid ' + stroke }}
+        style={{ left: OUT, width, top: barTopOffset, background: fill, border: '1px solid ' + stroke }}
         onPointerDown={startMove}
         title={task.name}
       >

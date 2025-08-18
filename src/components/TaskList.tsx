@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
 import { Task, Milestone } from '../types/gantt';
-import { Pencil, Trash2, GripVertical, Diamond } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Badge } from './ui/badge';
+
+import { Pencil, Trash2, GripVertical, Diamond, MoreHorizontal, ChevronRight, ChevronDown, Plus } from 'lucide-react';
 
 interface TaskListProps {
   tasks: Task[];
@@ -12,6 +17,9 @@ interface TaskListProps {
   onReorderTasks: (newTasks: Task[]) => void;
   rowHeight: number;
   onFocusTask?: (taskId: string) => void;
+  onCreateTask: (name: string) => void;
+  onCreateSubtask: (parentId: string, name: string) => void;
+  onToggleCollapse: (taskId: string, next: boolean) => void;
 }
 
 /**
@@ -33,6 +41,11 @@ export const TaskList: React.FC<TaskListProps> = ({
   onFocusTask,
 }) => {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [addingTask, setAddingTask] = useState(false);
+  const [newTaskName, setNewTaskName] = useState('');
+  const [addingSubParent, setAddingSubParent] = useState<string | null>(null);
+  const [newSubName, setNewSubName] = useState('');
+
   const [overIndex, setOverIndex] = useState<number | null>(null);
 
   // Запуск DnD — только с "ручки"
@@ -64,6 +77,10 @@ export const TaskList: React.FC<TaskListProps> = ({
     setOverIndex(null);
   };
   const endDrag = () => { setDragIndex(null); setOverIndex(null); };
+  const childrenOf = (id: string) => tasks.filter(t => (t as any).parentId === id);
+  const hasChildren = (id: string) => childrenOf(id).length > 0;
+  const roots = tasks.filter(t => !(t as any).parentId);
+
 
   const Row: React.FC<{t: Task; i: number}> = ({ t, i }) => (
     <div
@@ -151,26 +168,163 @@ export const TaskList: React.FC<TaskListProps> = ({
     </div>
   );
 
+  
   return (
-    <div className="text-sm select-none">
-      {tasks.map((t, i) => (
-        <Row key={t.id} t={t} i={i} />
+    <div className="text-sm">
+      {/* Tasks */}
+      {roots.map((t, i) => (
+        <div key={t.id}>
+          <div
+            className="grid grid-cols-[auto,1fr,auto,auto,auto] items-center gap-2 hover:bg-accent/30 border-b"
+            style={{ height: rowHeight }}
+            onClick={() => onFocusTask && onFocusTask(t.id)}
+          >
+            <button
+              className="p-1 rounded hover:bg-accent"
+              onClick={(e) => { e.stopPropagation(); onToggleCollapse(t.id, !(t as any).isCollapsed); }}
+              title={(t as any).isCollapsed ? 'Развернуть' : 'Свернуть'}
+            >
+              {(t as any).isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+
+            <div className="min-w-0 py-1">
+              <div className="text-sm font-medium leading-none truncate">{t.name}</div>
+              <div className="text-xs text-muted-foreground truncate">
+                {t.assignee ? t.assignee + " • " : ""}{formatShortDate(t.startDate)} — {formatShortDate(t.endDate)}
+              </div>
+            </div>
+
+            {hasChildren(t.id) && (
+              <Badge variant="secondary" className="justify-self-end">{childrenOf(t.id).length}</Badge>
+            )}
+
+            <span
+              className="p-1 rounded hover:bg-accent justify-self-end"
+              onClick={(e) => { e.stopPropagation(); onEditTask(t); }}
+              title="Редактировать"
+            >
+              <Pencil className="w-4 h-4" />
+            </span>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="p-1 rounded hover:bg-accent justify-self-end" title="Действия">
+                  <MoreHorizontal className="w-4 h-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem onClick={() => setAddingSubParent(t.id)}>
+                  Создать подзадачу
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => { if (confirm('Удалить задачу и все её подзадачи?')) onDeleteTask(t.id); }} className="text-destructive">
+                  Удалить
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+          </div>
+
+          {/* Children */}
+          {!(t as any).isCollapsed && childrenOf(t.id).map((c) => (
+            <div key={c.id}
+              className="grid grid-cols-[auto,1fr,auto,auto] items-center gap-2 pl-6 hover:bg-accent/20 border-b"
+              style={{ height: rowHeight }}
+              onClick={() => onFocusTask && onFocusTask(c.id)}
+            >
+              <div />
+              <div className="min-w-0 py-1">
+                <div className="text-sm leading-none truncate">{c.name}</div>
+                <div className="text-xs text-muted-foreground truncate">
+                  {c.assignee ? c.assignee + " • " : ""}{formatShortDate(c.startDate)} — {formatShortDate(c.endDate)}
+                </div>
+              </div>
+              <span
+                className="p-1 rounded hover:bg-accent justify-self-end"
+                onClick={(e) => { e.stopPropagation(); onEditTask(c); }}
+                title="Редактировать"
+              >
+                <Pencil className="w-4 h-4" />
+              </span>
+              <span
+                className="p-1 rounded hover:bg-accent text-destructive justify-self-end"
+                onClick={(e) => { e.stopPropagation(); onDeleteTask(c.id); }}
+                title="Удалить"
+              >
+                <Trash2 className="w-4 h-4" />
+              </span>
+            </div>
+          ))}
+
+          {/* Add subtask inline */}
+          {addingSubParent === t.id && !(t as any).isCollapsed && (
+            <div className="flex items-center gap-2 pl-6 border-b" style={{ height: rowHeight }}>
+              <Input
+                autoFocus
+                placeholder="Название подзадачи"
+                value={newSubName}
+                onChange={e => setNewSubName(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && newSubName.trim()) {
+                    onCreateSubtask(t.id, newSubName.trim());
+                    setNewSubName(''); setAddingSubParent(null);
+                  }
+                  if (e.key === 'Escape') { setNewSubName(''); setAddingSubParent(null); }
+                }}
+              />
+              <Button
+                onClick={() => { if (newSubName.trim()) { onCreateSubtask(t.id, newSubName.trim()); setNewSubName(''); setAddingSubParent(null); } }}
+              >
+                Добавить
+              </Button>
+            </div>
+          )}
+
+          {/* Quick add subtask button */}
+          {!(t as any).isCollapsed && (
+            <div className="pl-6 py-1">
+              <Button variant="ghost" size="sm" onClick={() => setAddingSubParent(t.id)}>
+                <Plus className="w-4 h-4 mr-1" /> Добавить подзадачу
+              </Button>
+            </div>
+          )}
+        </div>
       ))}
 
-      {milestones.length > 0 && (
-        <div className="mt-2 mb-1 px-3 text-xs text-muted-foreground">Майлстоуны</div>
-      )}
+      {/* Milestones */}
       {milestones.map((m) => (
-        <MilestoneRow key={m.id} m={m} />
+        <div key={m.id} className="grid grid-cols-[auto,1fr] items-center gap-2 border-b" style={{ height: rowHeight }}>
+          <Diamond className="w-4 h-4 ml-1" />
+          <div className="text-xs text-muted-foreground truncate">{m.name}</div>
+        </div>
       ))}
+
+      {/* Add task at bottom */}
+      <div className="py-2">
+        {addingTask ? (
+          <div className="flex items-center gap-2">
+            <Input
+              autoFocus
+              placeholder="Название задачи"
+              value={newTaskName}
+              onChange={e => setNewTaskName(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && newTaskName.trim()) { onCreateTask(newTaskName.trim()); setNewTaskName(''); setAddingTask(false); }
+                if (e.key === 'Escape') { setNewTaskName(''); setAddingTask(false); }
+              }}
+            />
+            <Button onClick={() => { if (newTaskName.trim()) { onCreateTask(newTaskName.trim()); setNewTaskName(''); setAddingTask(false); } }}>
+              Добавить
+            </Button>
+          </div>
+        ) : (
+          <Button variant="ghost" onClick={() => setAddingTask(true)}>
+            <Plus className="w-4 h-4 mr-1" /> Добавить задачу
+          </Button>
+        )}
+      </div>
     </div>
   );
-};
-
-function formatShortDate(d: Date) {
-  try {
-    const dt = (d instanceof Date) ? d : new Date(d);
-    return dt.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+);
   } catch {
     return '';
   }

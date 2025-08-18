@@ -4,7 +4,6 @@ import { Timeline } from './Timeline';
 import { TaskBar } from './TaskBar';
 import { TaskList } from './TaskList';
 import { TaskDependencyLine } from './TaskDependencyLine';
-import { GridOverlay } from './GridOverlay';
 import { addDays, differenceInDays } from '../utils/dateUtils';
 
 interface Props {
@@ -31,6 +30,52 @@ export const GanttChart: React.FC<Props> = ({
   const [selectedDepId, setSelectedDepId] = useState<string | null>(null);
 
   const dayWidth = DAY_WIDTHS[unit];
+  const childrenByParent = useMemo(() => {
+    const map = new Map<string, Task[]>();
+    for (const t of project.tasks) {
+      const pid = (t as any).parentId || null;
+      if (pid) {
+        const arr = map.get(pid) || [];
+        arr.push(t);
+        map.set(pid, arr);
+      }
+    }
+    // sort children by orderIndex then startDate
+    for (const [k, arr] of map) {
+      arr.sort((a,b) => ((a.orderIndex ?? 0) - (b.orderIndex ?? 0)) || a.startDate.getTime() - b.startDate.getTime());
+    }
+    return map;
+  }, [project.tasks]);
+
+  const hasChildren = useMemo(() => {
+    const set = new Set<string>();
+    for (const [pid, arr] of childrenByParent) {
+      if (arr.length) set.add(pid);
+    }
+    return set;
+  }, [childrenByParent]);
+
+  const visibleTasks = useMemo(() => {
+    const roots = project.tasks.filter(t => !(t as any).parentId);
+    // keep existing order
+    const byId = new Map(project.tasks.map(t => [t.id, t]));
+    const order = project.tasks.map(t => t.id).filter(id => !byId.get(id)?.parentId);
+    const out: Task[] = [];
+    for (const id of order) {
+      const root = byId.get(id)!;
+      out.push(root);
+      if (!(root as any).isCollapsed) {
+        const kids = childrenByParent.get(root.id) || [];
+        for (const k of kids) out.push(k);
+      }
+    }
+    // handle orphans (parent not found)
+    for (const t of project.tasks) {
+      if ((t as any).parentId && !byId.has((t as any).parentId!)) out.push(t);
+    }
+    return out;
+  }, [project.tasks, childrenByParent]);
+
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const barsRef = useRef<HTMLDivElement | null>(null);
@@ -103,11 +148,13 @@ export const GanttChart: React.FC<Props> = ({
     onUpdateProject({ ...project, tasks });
   };
 
+  // Добавление зависимости: запрет циклов и дублей; цель не может начинаться раньше конца источника.
+  // При необходимости сдвигаем цель вправо, сохраняя её длительность.
   const addDependency = (fromId: string, toId: string) => {
     if (fromId === toId) return;
 
     const deps = project.dependencies || [];
-    if (deps.some(d => d.fromId === toId && d.toId === fromId)) return; // запрет loop
+    if (deps.some(d => d.fromId === toId && d.toId === fromId)) return; // запрет обратной связи (loop)
     if (deps.some(d => d.fromId === fromId && d.toId === toId)) return; // дубликат
 
     let tasks = project.tasks;
@@ -142,7 +189,7 @@ export const GanttChart: React.FC<Props> = ({
     return map;
   }, [project.tasks]);
 
-  // заблокированные цели для уже связанных пар
+  // --- НОВОЕ: скрываем "+" на барах, уже связанных с источником (в любом направлении) ---
   const blockedTargets = useMemo(() => {
     const set = new Set<string>();
     if (!connectingFrom) return set;
@@ -223,15 +270,35 @@ export const GanttChart: React.FC<Props> = ({
           milestones={project.milestones}
           onEditTask={onEditTask ?? (() => {})}
           onEditMilestone={onEditMilestone ?? (() => {})}
-          onDeleteTask={id =>
-            onUpdateProject({ ...project, tasks: project.tasks.filter(t => t.id !== id) })
-          }
+          onDeleteTask={id => {
+            const toDelete = new Set<string>([id]);
+            for (const t of project.tasks) { if ((t as any).parentId === id) toDelete.add(t.id); }
+            onUpdateProject({ ...project, tasks: project.tasks.filter(t => !toDelete.has(t.id)) });
+          }}
           onDeleteMilestone={id =>
             onUpdateProject({ ...project, milestones: project.milestones.filter(m => m.id !== id) })
           }
           onReorderTasks={newTasks => onUpdateProject({ ...project, tasks: newTasks })}
           rowHeight={ROW_HEIGHT}
           onFocusTask={focusTask}
+                  onCreateTask={(name) => {
+            const today = new Date();
+            const t: Task = { id: 't-' + Math.random().toString(36).slice(2), name, startDate: today, endDate: addDays(today, 5), progress: 0, priority: 1, assignee: '', color: '#4f46e5' };
+            onUpdateProject({ ...project, tasks: [...project.tasks, t] });
+          }}
+          onCreateSubtask={(parentId, name) => {
+            const today = new Date();
+            const st = today; const en = addDays(today, 5);
+            const t: Task = { id: 't-' + Math.random().toString(36).slice(2), name, startDate: st, endDate: en, progress: 0, priority: 1, assignee: '', color: '#10b981', parentId } as any;
+            const parentIdx = project.tasks.findIndex(x => x.id === parentId);
+            const parent = parentIdx >=0 ? project.tasks[parentIdx] : undefined;
+            const updatedParent = parent ? { ...parent, isCollapsed: false } : undefined;
+            const tasks = project.tasks.map(x => x.id === parentId && updatedParent ? (updatedParent as Task) : x);
+            onUpdateProject({ ...project, tasks: [...tasks, t] });
+          }}
+          onToggleCollapse={(taskId, next) => {
+            onUpdateProject({ ...project, tasks: project.tasks.map(t => t.id === taskId ? ({ ...t, isCollapsed: next }) : t) });
+          }}
         />
       </div>
 
@@ -239,25 +306,34 @@ export const GanttChart: React.FC<Props> = ({
       <div
         className="w-1 cursor-col-resize bg-muted/40 hover:bg-muted/60"
         onMouseDown={onResizeMouseDown}
-      />
+                onCreateTask={(name) => {
+            const today = new Date();
+            const t: Task = { id: 't-' + Math.random().toString(36).slice(2), name, startDate: today, endDate: addDays(today, 5), progress: 0, priority: 1, assignee: '', color: '#4f46e5' };
+            onUpdateProject({ ...project, tasks: [...project.tasks, t] });
+          }}
+          onCreateSubtask={(parentId, name) => {
+            const today = new Date();
+            const st = today; const en = addDays(today, 5);
+            const t: Task = { id: 't-' + Math.random().toString(36).slice(2), name, startDate: st, endDate: en, progress: 0, priority: 1, assignee: '', color: '#10b981', parentId } as any;
+            const parentIdx = project.tasks.findIndex(x => x.id === parentId);
+            const parent = parentIdx >=0 ? project.tasks[parentIdx] : undefined;
+            const updatedParent = parent ? { ...parent, isCollapsed: false } : undefined;
+            const tasks = project.tasks.map(x => x.id === parentId && updatedParent ? (updatedParent as Task) : x);
+            onUpdateProject({ ...project, tasks: [...tasks, t] });
+          }}
+          onToggleCollapse={(taskId, next) => {
+            onUpdateProject({ ...project, tasks: project.tasks.map(t => t.id === taskId ? ({ ...t, isCollapsed: next }) : t) });
+          }}
+        />
 
       {/* Правая часть */}
       <div className="flex-1 overflow-auto" ref={scrollRef}>
         <div style={{ minWidth: contentWidth }}>
           <Timeline startDate={start} endDate={end} dayWidth={dayWidth} unit={unit} />
 
-          <div className="relative" style={{ height: project.tasks.length * ROW_HEIGHT }} ref={barsRef}>
-            {/* Сетка и выделение выходных/праздников */}
-            <GridOverlay
-              startDate={start}
-              endDate={end}
-              unit={unit}
-              dayWidth={dayWidth}
-              height={project.tasks.length * ROW_HEIGHT}
-            />
-
+          <div className="relative" style={{ height: project.tasksvisibleTasks.length * ROW_HEIGHT }} ref={barsRef}>
             <div className="absolute inset-0">
-              {project.tasks.map((t, i) => (
+              {visibleTasks.map((t, i) => (
                 <div
                   key={t.id}
                   className="absolute left-0 right-0"
@@ -265,6 +341,7 @@ export const GanttChart: React.FC<Props> = ({
                 >
                   <TaskBar
                     task={t}
+                    asThinLine={hasChildren.has(t.id)}
                     projectStartDate={start}
                     dayWidth={dayWidth}
                     rowHeight={ROW_HEIGHT}
