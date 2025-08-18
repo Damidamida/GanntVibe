@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 import React, { useMemo, useState } from 'react';
+=======
+import React, { useMemo, useState, useRef, useEffect } from 'react';
+>>>>>>> fb11fd0 (chore: initial commit)
 import { Project, Task, Milestone, TaskDependency, TimelineUnit } from '../types/gantt';
 import { Timeline } from './Timeline';
 import { TaskBar } from './TaskBar';
@@ -6,6 +10,7 @@ import { TaskList } from './TaskList';
 import { TaskDependencyLine } from './TaskDependencyLine';
 import { addDays, differenceInDays } from '../utils/dateUtils';
 
+<<<<<<< HEAD
 interface Props { onEditTask?: (t: Task) => void; onEditMilestone?: (m: Milestone) => void;
   
   project: Project;
@@ -34,6 +39,170 @@ export const GanttChart: React.FC<Props> = ({ project, onUpdateProject, unit, on
     const onUp = () => {
       setResizing(false);
       localStorage.setItem('listWidth', String(listWidth));
+=======
+interface Props {
+  project: Project;
+  onUpdateProject: (project: Project) => void;
+  unit: TimelineUnit;
+  onEditTask?: (t: Task) => void;
+  onEditMilestone?: (m: Milestone) => void;
+}
+
+const ROW_HEIGHT = 32;
+const DAY_WIDTHS: Record<TimelineUnit, number> = { day: 24, week: 12, month: 4 };
+const HEADER_HEIGHT = 49;
+
+export const GanttChart: React.FC<Props> = ({
+  project,
+  onUpdateProject,
+  unit,
+  onEditTask,
+  onEditMilestone,
+}) => {
+  const [listWidth, setListWidth] = useState<number>(360);
+  const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
+  const [selectedDepId, setSelectedDepId] = useState<string | null>(null);
+
+  const dayWidth = DAY_WIDTHS[unit];
+
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const barsRef = useRef<HTMLDivElement | null>(null);
+
+  const { start, end, totalDays } = useMemo(() => {
+    const tasks = project.tasks || [];
+    const milestones = project.milestones || [];
+
+    const today = new Date();
+    let minStart: Date | null = null;
+    let maxEnd: Date | null = null;
+
+    for (const t of tasks) {
+      if (!minStart || t.startDate < minStart) minStart = t.startDate;
+      if (!maxEnd || t.endDate > maxEnd) maxEnd = t.endDate;
+    }
+    for (const m of milestones) {
+      if (!minStart || m.date < minStart) minStart = m.date;
+      if (!maxEnd || m.date > maxEnd) maxEnd = m.date;
+    }
+
+    let s: Date;
+    let e: Date;
+    if (!minStart || !maxEnd) {
+      s = addDays(today, -60);
+      e = addDays(today, 30);
+    } else {
+      s = addDays(minStart, -60);
+      e = addDays(maxEnd, 7);
+    }
+
+    const capEnd = new Date(2030, 11, 31);
+    if (e < capEnd) e = capEnd;
+
+    const days = Math.max(1, differenceInDays(e, s));
+    return { start: s, end: e, totalDays: days };
+  }, [project.tasks, project.milestones]);
+
+  const contentWidth = totalDays * dayWidth;
+
+  const onTaskUpdate = (taskId: string, updates: Partial<Task>) => {
+    const tasks = project.tasks.map(t => (t.id === taskId ? { ...t, ...updates } : t));
+    onUpdateProject({ ...project, tasks });
+  };
+
+  // Зависимости: запрет петель и дубликатов, сдвиг цели без изменения длительности
+  const addDependency = (fromId: string, toId: string) => {
+    if (fromId === toId) return;
+
+    const deps = project.dependencies || [];
+    if (deps.some(d => d.fromId === toId && d.toId === fromId)) return; // loop
+    if (deps.some(d => d.fromId === fromId && d.toId === toId)) return; // duplicate
+
+    let tasks = project.tasks;
+    const from = project.tasks.find(t => t.id === fromId);
+    const idx = project.tasks.findIndex(t => t.id === toId);
+
+    if (from && idx >= 0) {
+      const tgt = project.tasks[idx];
+      if (tgt.startDate.getTime() < from.endDate.getTime()) {
+        const delta = from.endDate.getTime() - tgt.startDate.getTime();
+        const newStart = new Date(tgt.startDate.getTime() + delta);
+        const newEnd = new Date(tgt.endDate.getTime() + delta);
+        const updated = { ...tgt, startDate: newStart, endDate: newEnd };
+        tasks = tasks.map((t, i) => (i === idx ? updated : t));
+      }
+    }
+
+    const dep: TaskDependency = { id: String(Date.now()), fromId, toId, type: 'fs' };
+    onUpdateProject({ ...project, tasks, dependencies: [...deps, dep] });
+  };
+
+  const beginConnect = (taskId: string) => setConnectingFrom(taskId);
+  const pickTarget = (taskId: string) => {
+    if (connectingFrom) addDependency(connectingFrom, taskId);
+    setConnectingFrom(null);
+  };
+
+  const idToIndex: Record<string, number> = useMemo(() => {
+    const map: Record<string, number> = {};
+    project.tasks.forEach((t, i) => { map[t.id] = i; });
+    return map;
+  }, [project.tasks]);
+
+  // Центровка бара по клику на задачу слева
+  const focusTask = (taskId: string) => {
+    const container = scrollRef.current;
+    const barsEl = barsRef.current;
+    if (!container || !barsEl) return;
+
+    const idx = idToIndex[taskId];
+    const task = project.tasks.find(t => t.id === taskId);
+    if (idx === undefined || idx === null || !task) return;
+
+    // Горизонталь
+    const left = differenceInDays(task.startDate, start) * dayWidth;
+    const width = (differenceInDays(task.endDate, task.startDate) + 1) * dayWidth;
+    const centerX = left + width / 2;
+    const targetLeft = Math.max(0, centerX - container.clientWidth / 2);
+
+    // Вертикаль
+    const contRect = container.getBoundingClientRect();
+    const barsRect = barsEl.getBoundingClientRect();
+    const barsTop = (barsRect.top - contRect.top) + container.scrollTop;
+    const centerY = barsTop + idx * ROW_HEIGHT + ROW_HEIGHT / 2;
+    const targetTop = Math.max(0, centerY - container.clientHeight / 2);
+
+    try {
+      container.scrollTo({ left: targetLeft, top: targetTop, behavior: 'smooth' });
+    } catch {
+      container.scrollLeft = targetLeft;
+      container.scrollTop = targetTop;
+    }
+  };
+
+  // Удаление выбранной зависимости по Delete/Backspace
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!selectedDepId) return;
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        const deps = (project.dependencies || []).filter(d => d.id !== selectedDepId);
+        onUpdateProject({ ...project, dependencies: deps });
+        setSelectedDepId(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedDepId, project, onUpdateProject]);
+
+  const onResizeMouseDown: React.MouseEventHandler<HTMLDivElement> = e => {
+    const startX = e.clientX;
+    const startW = listWidth;
+    const onMove = (ev: MouseEvent) => {
+      const next = Math.max(220, Math.min(700, startW + (ev.clientX - startX)));
+      setListWidth(next);
+    };
+    const onUp = () => {
+>>>>>>> fb11fd0 (chore: initial commit)
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
     };
@@ -41,6 +210,7 @@ export const GanttChart: React.FC<Props> = ({ project, onUpdateProject, unit, on
     document.addEventListener('mouseup', onUp);
   };
 
+<<<<<<< HEAD
   const [connectingFrom, setConnectingFrom] = useState<{id: string, side: 'left'|'right'} | null>(null);
 
   // bounds extended to Dec 31, 2030
@@ -180,6 +350,86 @@ export const GanttChart: React.FC<Props> = ({ project, onUpdateProject, unit, on
               <div key={m.id} className="absolute" style={{ left: x, top: HEADER_HEIGHT + 6, width: 2, bottom: 0, background: m.color || '#f59e0b' }} />
             );
           })}
+=======
+  return (
+    <div className="h-full w-full flex">
+      {/* Левая панель */}
+      <div className="border-r overflow-auto" style={{ width: listWidth }}>
+        <div style={{ height: HEADER_HEIGHT }} />
+        <TaskList
+          tasks={project.tasks}
+          milestones={project.milestones}
+          onEditTask={onEditTask ?? (() => {})}
+          onEditMilestone={onEditMilestone ?? (() => {})}
+          onDeleteTask={id =>
+            onUpdateProject({ ...project, tasks: project.tasks.filter(t => t.id !== id) })
+          }
+          onDeleteMilestone={id =>
+            onUpdateProject({ ...project, milestones: project.milestones.filter(m => m.id !== id) })
+          }
+          onReorderTasks={newTasks => onUpdateProject({ ...project, tasks: newTasks })}
+          rowHeight={ROW_HEIGHT}
+          onFocusTask={focusTask}
+        />
+      </div>
+
+      {/* Ресайзер */}
+      <div
+        className="w-1 cursor-col-resize bg-muted/40 hover:bg-muted/60"
+        onMouseDown={onResizeMouseDown}
+      />
+
+      {/* Правая часть */}
+      <div className="flex-1 overflow-auto" ref={scrollRef}>
+        <div style={{ minWidth: contentWidth }}>
+          <Timeline startDate={start} endDate={end} dayWidth={dayWidth} unit={unit} />
+
+          <div className="relative" style={{ height: project.tasks.length * ROW_HEIGHT }} ref={barsRef}>
+            <div className="absolute inset-0">
+              {project.tasks.map((t, i) => (
+                <div
+                  key={t.id}
+                  className="absolute left-0 right-0"
+                  style={{ top: i * ROW_HEIGHT, height: ROW_HEIGHT }}
+                >
+                  <TaskBar
+                    task={t}
+                    projectStartDate={start}
+                    dayWidth={dayWidth}
+                    rowHeight={ROW_HEIGHT}
+                    onTaskUpdate={onTaskUpdate}
+                    showTargetHandles={!!connectingFrom && connectingFrom !== t.id}
+                    onStartConnect={(((id: string) => beginConnect(id)) as any)}
+                    onPickTarget={(((id: string) => pickTarget(id)) as any)}
+                  />
+                </div>
+              ))}
+
+              {(project.dependencies || []).map(d => {
+                const fromTask = project.tasks.find(t => t.id === d.fromId);
+                const toTask = project.tasks.find(t => t.id === d.toId);
+                if (!fromTask || !toTask) return null;
+                const fromIndex = idToIndex[fromTask.id] ?? 0;
+                const toIndex = idToIndex[toTask.id] ?? 0;
+                return (
+                  <TaskDependencyLine
+                    key={d.id}
+                    dependency={d}
+                    fromTask={fromTask}
+                    toTask={toTask}
+                    projectStartDate={start}
+                    dayWidth={dayWidth}
+                    fromIndex={fromIndex}
+                    toIndex={toIndex}
+                    rowHeight={ROW_HEIGHT}
+                    selected={selectedDepId === d.id}
+                    onSelect={(id) => setSelectedDepId(id)}
+                  />
+                );
+              })}
+            </div>
+          </div>
+>>>>>>> fb11fd0 (chore: initial commit)
         </div>
       </div>
     </div>
