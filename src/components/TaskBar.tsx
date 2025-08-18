@@ -1,51 +1,45 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { Task } from '../types/gantt';
-import { differenceInDays } from '../utils/dateUtils';
+import { addDays, differenceInDays } from '../utils/dateUtils';
 
-interface TaskBarProps {
+interface Props {
   task: Task;
   projectStartDate: Date;
   dayWidth: number;
   rowHeight: number;
   onTaskUpdate: (taskId: string, updates: Partial<Task>) => void;
-  showTargetHandles: boolean;
-  onStartConnect: (taskId: string, side: 'left' | 'right') => void;
-  onPickTarget: (taskId: string) => void;
+
+  // dependency UX
+  showTargetHandles?: boolean;
+  onStartConnect?: (taskId: string) => void;
+  onPickTarget?: (taskId: string) => void;
+
+  // автоскролл и «заморозка» окна
+  scrollContainer?: HTMLDivElement | null;
+  onDragChange?: (dragging: boolean) => void;
 }
 
-<<<<<<< HEAD
-export const TaskBar: React.FC<TaskBarProps> = ({
-  task, projectStartDate, dayWidth, rowHeight, onTaskUpdate,
-  showTargetHandles, onStartConnect, onPickTarget
-}) => {
-  const [hover, setHover] = useState(false);
+const MIN_DAYS = 1;
 
-  const startOffset = differenceInDays(task.startDate, projectStartDate);
-  const duration = Math.max(1, differenceInDays(task.endDate, task.startDate));
-  const left = startOffset * dayWidth;
-  const width = duration * dayWidth;
-  const height = Math.max(8, rowHeight * 0.55);
-  const V_OFFSET = -2;
-  const top = (rowHeight - height) / 2 + V_OFFSET;
+// простая функция затемнения/осветления HEX
+function shadeHexColor(hex: string, percent: number): string {
+  try {
+    const h = hex.replace('#', '');
+    const num = parseInt(h.length === 3 ? h.split('').map(x => x + x).join('') : h, 16);
+    let r = (num >> 16) & 0xff;
+    let g = (num >> 8) & 0xff;
+    let b = num & 0xff;
+    r = Math.min(255, Math.max(0, Math.round(r + (percent / 100) * 255)));
+    g = Math.min(255, Math.max(0, Math.round(g + (percent / 100) * 255)));
+    b = Math.min(255, Math.max(0, Math.round(b + (percent / 100) * 255)));
+    const toHex = (v: number) => v.toString(16).padStart(2, '0');
+    return '#' + toHex(r) + toHex(g) + toHex(b);
+  } catch {
+    return hex; // на всякий случай
+  }
+}
 
-  const onMouseDownMove: React.MouseEventHandler<HTMLDivElement> = (e) => {
-    const startX = e.clientX;
-    const origStart = new Date(task.startDate);
-    const origEnd = new Date(task.endDate);
-    const onMove = (ev: MouseEvent) => {
-      const dx = ev.clientX - startX;
-      const days = Math.round(dx / dayWidth);
-      if (days !== 0) {
-        const ns = new Date(origStart); ns.setDate(ns.getDate() + days);
-        const ne = new Date(origEnd);   ne.setDate(ne.getDate() + days);
-=======
-// Размеры и отступы
-const PLUS_SIZE = 24;       // 1.5x больше обычного (~16px)
-const PLUS_GAP = 5;         // 5px от края бара
-const RESIZE_WIDTH = 6;     // ручки ресайза строго на гранях бара
-const HIT_PAD = PLUS_SIZE + PLUS_GAP; // расширяем зону hover, чтобы + не исчезал
-
-export const TaskBar: React.FC<TaskBarProps> = ({
+export const TaskBar: React.FC<Props> = ({
   task,
   projectStartDate,
   dayWidth,
@@ -54,254 +48,277 @@ export const TaskBar: React.FC<TaskBarProps> = ({
   showTargetHandles,
   onStartConnect,
   onPickTarget,
+  scrollContainer,
+  onDragChange,
 }) => {
   const [hover, setHover] = useState(false);
 
-  const barHeight = Math.max(18, Math.round(rowHeight * 0.6));
-  const top = Math.round((rowHeight - barHeight) / 2);
+  const [dragging, setDragging] = useState<null | 'move' | 'resize-left' | 'resize-right'>(null);
+  const [dragStartX, setDragStartX] = useState(0);
+  const [origStart, setOrigStart] = useState<Date>(task.startDate);
+  const [origEnd, setOrigEnd] = useState<Date>(task.endDate);
 
-  const barLeft = differenceInDays(task.startDate, projectStartDate) * dayWidth;
-  const barWidth = (differenceInDays(task.endDate, task.startDate) + 1) * dayWidth;
+  const raf = useRef<number | null>(null);
+  const pending = useRef<Partial<Task> | null>(null);
 
-  // ---- Move whole bar ----
-  const onMouseDownMove: React.MouseEventHandler<HTMLDivElement> = (e) => {
+  const barRef = useRef<HTMLDivElement | null>(null);
+  const hitboxRef = useRef<HTMLDivElement | null>(null);
+  const originLeftPxRef = useRef<number>(0);
+  const widthPxRef = useRef<number>(0);
+
+  useEffect(() => {
+    return () => {
+      if (raf.current) cancelAnimationFrame(raf.current);
+    };
+  }, []);
+
+  // Геометрия бара
+  const left = useMemo(() => differenceInDays(task.startDate, projectStartDate) * dayWidth, [task.startDate, projectStartDate, dayWidth]);
+  const width = useMemo(() => (differenceInDays(task.endDate, task.startDate) + 1) * dayWidth, [task.endDate, task.startDate, dayWidth]);
+
+  // Константы UI
+  const BAR_H = Math.max(20, rowHeight - 10); // бар по центру строки
+  const BAR_TOP = (rowHeight - BAR_H) / 2;
+
+  const PLUS_SIZE = 24;    // 1.5x
+  const GAP_OUTSIDE = 5;   // отступ от краёв колбаски СНАРУЖИ
+  const OUT = PLUS_SIZE + GAP_OUTSIDE;
+  const RESIZE_W = 4;      // зона ресайза по краям
+
+  const fill = (task as any).color || '#3b82f6';
+  const stroke = shadeHexColor(fill, -25);
+
+  // Хелперы
+  const snapDxToDays = (dx: number) => Math.round(dx / dayWidth);
+
+  const queueUpdate = (updates: Partial<Task>) => {
+    pending.current = updates;
+    if (raf.current == null) {
+      raf.current = requestAnimationFrame(() => {
+        raf.current = null;
+        if (pending.current) {
+          onTaskUpdate(task.id, pending.current);
+          pending.current = null;
+        }
+      });
+    }
+  };
+
+  // ===== ВИЗУАЛЬНЫЙ DRAG ДЛЯ ПЕРЕМЕЩЕНИЯ =====
+  const applyVisualShift = (dx: number) => {
+    if (barRef.current) {
+      barRef.current.style.transform = `translate3d(${dx}px,0,0)`;
+    }
+  };
+  const clearVisualShift = () => {
+    if (barRef.current) {
+      barRef.current.style.transform = '';
+    }
+  };
+
+  const startMove: React.PointerEventHandler<HTMLDivElement> = (e) => {
+    const target = e.target as HTMLElement;
+    if (target.dataset.handle === 'resize' || target.closest('[data-role="plus"]')) return;
+
+    setDragging('move');
+    onDragChange?.(true);
+    setHover(false);
+    e.currentTarget.setPointerCapture(e.pointerId);
+
+    setDragStartX(e.clientX);
+    setOrigStart(task.startDate);
+    setOrigEnd(task.endDate);
+
+    originLeftPxRef.current = differenceInDays(task.startDate, projectStartDate) * dayWidth;
+    widthPxRef.current = (differenceInDays(task.endDate, task.startDate) + 1) * dayWidth;
+
+    if (barRef.current) {
+      barRef.current.style.willChange = 'transform';
+      (barRef.current.style as any)['userSelect'] = 'none';
+    }
+    e.preventDefault();
+  };
+
+  const startResizeLeft: React.PointerEventHandler<HTMLDivElement> = (e) => {
+    setDragging('resize-left');
+    onDragChange?.(true);
+    setHover(false);
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDragStartX(e.clientX);
+    setOrigStart(task.startDate);
+    setOrigEnd(task.endDate);
     e.preventDefault();
     e.stopPropagation();
-    const startX = e.clientX;
-    const initStart = task.startDate;
-    const initEnd = task.endDate;
+  };
 
-    const onMove = (ev: MouseEvent) => {
-      const dx = ev.clientX - startX;
-      const dDays = Math.round(dx / dayWidth);
+  const startResizeRight: React.PointerEventHandler<HTMLDivElement> = (e) => {
+    setDragging('resize-right');
+    onDragChange?.(true);
+    setHover(false);
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDragStartX(e.clientX);
+    setOrigStart(task.startDate);
+    setOrigEnd(task.endDate);
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const onPointerMove: React.PointerEventHandler<HTMLDivElement> = (e) => {
+    if (!dragging) return;
+
+    const cont = scrollContainer;
+    if (cont) {
+      const dx = e.clientX - dragStartX;
+      const projectedLeft = originLeftPxRef.current + (dragging === 'move' ? dx : 0);
+      const projectedRight = projectedLeft + widthPxRef.current;
+      const viewportLeft = cont.scrollLeft;
+      const viewportRight = viewportLeft + cont.clientWidth;
+      const edge = 24;
+
+      if (projectedRight > viewportRight - edge) {
+        cont.scrollLeft += dayWidth;
+      } else if (projectedLeft < viewportLeft + edge) {
+        cont.scrollLeft -= dayWidth;
+      }
+    }
+
+    const dx = e.clientX - dragStartX;
+    if (dragging === 'move') {
+      applyVisualShift(dx);
+    } else if (dragging === 'resize-left') {
+      const dDays = snapDxToDays(dx);
+      const nextStart = addDays(origStart, dDays);
+      const minStart = addDays(origEnd, -(MIN_DAYS - 1));
+      const clampedStart = nextStart > minStart ? minStart : nextStart;
+      queueUpdate({ startDate: clampedStart });
+    } else if (dragging === 'resize-right') {
+      const dDays = snapDxToDays(dx);
+      const nextEnd = addDays(origEnd, dDays);
+      const minEnd = addDays(origStart, MIN_DAYS - 1);
+      const clampedEnd = nextEnd < minEnd ? minEnd : nextEnd;
+      queueUpdate({ endDate: clampedEnd });
+    }
+  };
+
+  const onPointerUp: React.PointerEventHandler<HTMLDivElement> = (e) => {
+    if (!dragging) return;
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch {}
+
+    if (dragging === 'move') {
+      const dx = e.clientX - dragStartX;
+      clearVisualShift();
+      const dDays = snapDxToDays(dx);
       if (dDays !== 0) {
-        const ns = new Date(initStart);
-        ns.setDate(ns.getDate() + dDays);
-        const ne = new Date(initEnd);
-        ne.setDate(ne.getDate() + dDays);
->>>>>>> fb11fd0 (chore: initial commit)
-        onTaskUpdate(task.id, { startDate: ns, endDate: ne });
+        const dur = differenceInDays(origEnd, origStart);
+        const nextStart = addDays(origStart, dDays);
+        const nextEnd = addDays(nextStart, dur);
+        onTaskUpdate(task.id, { startDate: nextStart, endDate: nextEnd });
       }
-    };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    }
+
+    setDragging(null);
+    onDragChange?.(false);
   };
 
-<<<<<<< HEAD
-  const onMouseDownResizeRight: React.MouseEventHandler<HTMLDivElement> = (e) => {
-    e.stopPropagation();
-    const startX = e.clientX;
-    const origEnd = new Date(task.endDate);
-    const onMove = (ev: MouseEvent) => {
-      const dx = ev.clientX - startX;
-      const days = Math.max(0, Math.round(dx / dayWidth));
-      const ne = new Date(origEnd); ne.setDate(ne.getDate() + days);
-=======
-  // ---- Resize left ----
-  const onMouseDownResizeLeft: React.MouseEventHandler<HTMLDivElement> = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const startX = e.clientX;
-    const initStart = task.startDate;
-    const onMove = (ev: MouseEvent) => {
-      const dx = ev.clientX - startX;
-      const dDays = Math.round(dx / dayWidth);
-      const ns = new Date(initStart);
-      ns.setDate(ns.getDate() + dDays);
-      // минимум 1 день длительности
-      if (ns > task.endDate) return;
-      onTaskUpdate(task.id, { startDate: ns });
-    };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  };
+  const SourcePlus = ({ side }: { side: 'left' | 'right' }) => (
+    <button
+      type="button"
+      data-role="plus"
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => { e.stopPropagation(); onStartConnect && onStartConnect(task.id); }}
+      className="absolute rounded-full flex items-center justify-center shadow"
+      style={{
+        [side]: -(PLUS_SIZE + GAP_OUTSIDE),
+        top: (BAR_H - PLUS_SIZE) / 2,
+        width: PLUS_SIZE,
+        height: PLUS_SIZE,
+        background: '#4f8dfa',
+        color: '#ffffff',
+        lineHeight: 1,
+        fontSize: 18,
+        zIndex: 50,
+        pointerEvents: 'auto',
+        border: '1px solid rgba(0,0,0,.08)',
+      } as React.CSSProperties}
+      title="Связать отсюда"
+    >+</button>
+  );
 
-  // ---- Resize right ----
-  const onMouseDownResizeRight: React.MouseEventHandler<HTMLDivElement> = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const startX = e.clientX;
-    const initEnd = task.endDate;
-    const onMove = (ev: MouseEvent) => {
-      const dx = ev.clientX - startX;
-      const dDays = Math.round(dx / dayWidth);
-      const ne = new Date(initEnd);
-      ne.setDate(ne.getDate() + dDays);
-      if (ne < task.startDate) return;
->>>>>>> fb11fd0 (chore: initial commit)
-      onTaskUpdate(task.id, { endDate: ne });
-    };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  };
-
-<<<<<<< HEAD
-  const onMouseDownResizeLeft: React.MouseEventHandler<HTMLDivElement> = (e) => {
-    e.stopPropagation();
-    const startX = e.clientX;
-    const origStart = new Date(task.startDate);
-    const onMove = (ev: MouseEvent) => {
-      const dx = ev.clientX - startX;
-      const days = Math.round(dx / dayWidth);
-      const ns = new Date(origStart); ns.setDate(ns.getDate() + days);
-      if (ns <= task.endDate) {
-        onTaskUpdate(task.id, { startDate: ns });
-      }
-    };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  };
+  const TargetPlus = () => (
+    <button
+      type="button"
+      data-role="plus"
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => { e.stopPropagation(); onPickTarget && onPickTarget(task.id); }}
+      className="absolute rounded-full flex items-center justify-center shadow ring-1"
+      style={{
+        left: '50%',
+        transform: 'translateX(-50%)',
+        top: -(PLUS_SIZE + 8),
+        width: PLUS_SIZE,
+        height: PLUS_SIZE,
+        background: '#E5E7EB',
+        color: '#030212',
+        lineHeight: 1,
+        fontSize: 18,
+        zIndex: 60,
+        pointerEvents: 'auto',
+      } as React.CSSProperties}
+      title="Привязать сюда"
+    >+</button>
+  );
 
   return (
     <div
-      className="absolute rounded select-none flex items-center"
-      style={{ left, top, width, height, backgroundColor: task.color }}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      onMouseDown={onMouseDownMove}
-    >
-      <div onMouseDown={onMouseDownResizeLeft} className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize bg-black/20" />
-      <div onMouseDown={onMouseDownResizeRight} className="absolute right-0 top-0 bottom-0 w-1.5 cursor-ew-resize bg-black/20" />
-
-      {(hover && !showTargetHandles) && (
-        <>
-          <button
-            className="absolute -left-3 top-1/2 -translate-y-1/2 h-5 w-5 rounded-full bg-primary text-primary-foreground text-xs leading-5"
-            onClick={(e) => { e.stopPropagation(); onStartConnect(task.id, 'left'); }}
-          >+</button>
-          <button
-            className="absolute -right-3 top-1/2 -translate-y-1/2 h-5 w-5 rounded-full bg-primary text-primary-foreground text-xs leading-5"
-            onClick={(e) => { e.stopPropagation(); onStartConnect(task.id, 'right'); }}
-          >+</button>
-        </>
-      )}
-
-      {showTargetHandles && (
-        <button
-          className="absolute left-1/2 -translate-x-1/2 -top-3 h-5 px-2 rounded-full bg-secondary text-secondary-foreground text-xs"
-          onClick={(e) => { e.stopPropagation(); onPickTarget(task.id); }}
-          title="Соединить сюда"
-        >+</button>
-=======
-  return (
-    // ОБЁРТКА: расширяем на ширину плюсов, чтобы hover не пропадал
-    <div
+      ref={hitboxRef}
       className="absolute"
       style={{
-        left: barLeft - HIT_PAD,
-        top,
-        width: barWidth + HIT_PAD * 2,
-        height: barHeight,
+        left: left - OUT,
+        width: width + OUT * 2,
+        top: BAR_TOP,
+        height: BAR_H,
         overflow: 'visible',
-        zIndex: hover ? 5 : 1,
+        zIndex: 2,
+        pointerEvents: 'auto',
+        touchAction: 'none' as any,
+        userSelect: 'none' as any,
       }}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
+      onPointerEnter={() => setHover(true)}
+      onPointerLeave={() => { setHover(false); }}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
     >
-      {/* Сам бар */}
       <div
-        className="absolute rounded select-none shadow-sm"
-        style={{
-          left: HIT_PAD,
-          top: 0,
-          width: barWidth,
-          height: barHeight,
-          backgroundColor: task.color,
-        }}
-        onMouseDown={onMouseDownMove}
-        role="presentation"
+        ref={barRef}
+        className="absolute h-full rounded shadow-sm cursor-grab active:cursor-grabbing"
+        style={{ left: OUT, width, top: 0, background: fill, border: '1px solid ' + stroke }}
+        onPointerDown={startMove}
+        title={task.name}
       >
-        {/* Ручки ресайза прямо на гранях бара */}
         <div
-          onMouseDown={onMouseDownResizeLeft}
-          className="absolute top-0 bottom-0 cursor-ew-resize bg-black/20"
-          style={{ left: 0, width: RESIZE_WIDTH }}
-          title="Сдвинуть начало"
+          data-handle="resize"
+          className="absolute top-0 left-0 h-full"
+          style={{ width: 4, cursor: 'ew-resize' }}
+          onPointerDown={startResizeLeft}
+          title="Растянуть влево"
         />
         <div
-          onMouseDown={onMouseDownResizeRight}
-          className="absolute top-0 bottom-0 cursor-ew-resize bg-black/20"
-          style={{ right: 0, width: RESIZE_WIDTH }}
-          title="Сдвинуть конец"
+          data-handle="resize"
+          className="absolute top-0 right-0 h-full"
+          style={{ width: 4, cursor: 'ew-resize' }}
+          onPointerDown={startResizeRight}
+          title="Растянуть вправо"
         />
+
+        {hover && !dragging && !!onStartConnect && !showTargetHandles && (
+          <>
+            <SourcePlus side="left" />
+            <SourcePlus side="right" />
+          </>
+        )}
+
+        {!!showTargetHandles && !dragging && !!onPickTarget && <TargetPlus />}
       </div>
-
-      {/* Плюсы — внутри обёртки, но визуально вне бара (на 5px) */}
-      {hover && !showTargetHandles && (
-        <>
-          <button
-            type="button"
-            className="absolute flex items-center justify-center rounded-full"
-            style={{
-              left: HIT_PAD - (PLUS_GAP + PLUS_SIZE),
-              top: '50%',
-              width: PLUS_SIZE,
-              height: PLUS_SIZE,
-              transform: 'translateY(-50%)',
-              backgroundColor: 'rgba(59,130,246,1)',
-              color: 'white',
-            }}
-            onClick={(e) => { e.stopPropagation(); onStartConnect(task.id, 'left'); }}
-            title="Создать зависимость (из этой задачи)"
-          >
-            +
-          </button>
-
-          <button
-            type="button"
-            className="absolute flex items-center justify-center rounded-full"
-            style={{
-              left: HIT_PAD + barWidth + PLUS_GAP,
-              top: '50%',
-              width: PLUS_SIZE,
-              height: PLUS_SIZE,
-              transform: 'translateY(-50%)',
-              backgroundColor: 'rgba(59,130,246,1)',
-              color: 'white',
-            }}
-            onClick={(e) => { e.stopPropagation(); onStartConnect(task.id, 'right'); }}
-            title="Создать зависимость (из этой задачи)"
-          >
-            +
-          </button>
-        </>
-      )}
-
-      {/* Во время выбора цели показываем маркер над целевой колбаской */}
-      {showTargetHandles && (
-        <button
-          type="button"
-          className="absolute flex items-center justify-center rounded-full bg-gray-200 text-gray-700"
-          style={{
-            left: HIT_PAD + barWidth / 2,
-            top: -PLUS_SIZE - 6,
-            transform: 'translateX(-50%)',
-            width: PLUS_SIZE,
-            height: PLUS_SIZE,
-          }}
-          onClick={(e) => { e.stopPropagation(); onPickTarget(task.id); }}
-          title="Соединить сюда"
-        >
-          +
-        </button>
->>>>>>> fb11fd0 (chore: initial commit)
-      )}
     </div>
   );
 };
