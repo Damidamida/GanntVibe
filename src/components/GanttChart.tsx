@@ -4,6 +4,7 @@ import { Timeline } from './Timeline';
 import { TaskBar } from './TaskBar';
 import { TaskList } from './TaskList';
 import { TaskDependencyLine } from './TaskDependencyLine';
+import { GridOverlay } from './GridOverlay';
 import { addDays, differenceInDays } from '../utils/dateUtils';
 
 interface Props {
@@ -102,13 +103,11 @@ export const GanttChart: React.FC<Props> = ({
     onUpdateProject({ ...project, tasks });
   };
 
-  // Добавление зависимости: запрет циклов и дублей; цель не может начинаться раньше конца источника.
-  // При необходимости сдвигаем цель вправо, сохраняя её длительность.
   const addDependency = (fromId: string, toId: string) => {
     if (fromId === toId) return;
 
     const deps = project.dependencies || [];
-    if (deps.some(d => d.fromId === toId && d.toId === fromId)) return; // запрет обратной связи (loop)
+    if (deps.some(d => d.fromId === toId && d.toId === fromId)) return; // запрет loop
     if (deps.some(d => d.fromId === fromId && d.toId === toId)) return; // дубликат
 
     let tasks = project.tasks;
@@ -143,7 +142,7 @@ export const GanttChart: React.FC<Props> = ({
     return map;
   }, [project.tasks]);
 
-  // --- НОВОЕ: скрываем "+" на барах, уже связанных с источником (в любом направлении) ---
+  // заблокированные цели для уже связанных пар
   const blockedTargets = useMemo(() => {
     const set = new Set<string>();
     if (!connectingFrom) return set;
@@ -248,6 +247,15 @@ export const GanttChart: React.FC<Props> = ({
           <Timeline startDate={start} endDate={end} dayWidth={dayWidth} unit={unit} />
 
           <div className="relative" style={{ height: project.tasks.length * ROW_HEIGHT }} ref={barsRef}>
+            {/* Сетка и выделение выходных/праздников */}
+            <GridOverlay
+              startDate={start}
+              endDate={end}
+              unit={unit}
+              dayWidth={dayWidth}
+              height={project.tasks.length * ROW_HEIGHT}
+            />
+
             <div className="absolute inset-0">
               {project.tasks.map((t, i) => (
                 <div
