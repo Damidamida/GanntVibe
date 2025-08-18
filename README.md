@@ -1,8 +1,3 @@
-# Gantt Service MVP
-
-Это минимально-живой проект (Vite + React + TypeScript + Tailwind), в который я встроил ваши Figma-компоненты.
-Он уже содержит примеры задач и UI для диаграммы Ганта (TaskList, GanttChart, Milestone, Dependencies и т.д.).
-
 ## Как запустить локально
 
 1) Установите Node.js LTS (18+ / 20+).
