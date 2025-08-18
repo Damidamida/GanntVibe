@@ -18,11 +18,6 @@ const ROW_HEIGHT = 32;
 const DAY_WIDTHS: Record<TimelineUnit, number> = { day: 24, week: 12, month: 4 };
 const HEADER_HEIGHT = 49;
 
-type LayoutRow =
-  | { kind: 'task'; task: Task }
-  | { kind: 'addSub'; parentId: string }
-  | { kind: 'addTask' };
-
 export const GanttChart: React.FC<Props> = ({
   project,
   onUpdateProject,
@@ -35,8 +30,6 @@ export const GanttChart: React.FC<Props> = ({
   const [selectedDepId, setSelectedDepId] = useState<string | null>(null);
 
   const dayWidth = DAY_WIDTHS[unit];
-
-  // Map parent -> children (sorted)
   const childrenByParent = useMemo(() => {
     const map = new Map<string, Task[]>();
     for (const t of project.tasks) {
@@ -47,36 +40,40 @@ export const GanttChart: React.FC<Props> = ({
         map.set(pid, arr);
       }
     }
+    // sort children by orderIndex then startDate
     for (const [k, arr] of map) {
       arr.sort((a,b) => ((a.orderIndex ?? 0) - (b.orderIndex ?? 0)) || a.startDate.getTime() - b.startDate.getTime());
     }
     return map;
   }, [project.tasks]);
 
-  // Visible layout rows = задачи + (если раскрыт) подзадачи + строка "Добавить подзадачу" под родителем + в конце "Добавить задачу"
-  const layoutRows: LayoutRow[] = useMemo(() => {
+  const hasChildren = useMemo(() => {
+    const set = new Set<string>();
+    for (const [pid, arr] of childrenByParent) {
+      if (arr.length) set.add(pid);
+    }
+    return set;
+  }, [childrenByParent]);
+
+  const visibleTasks = useMemo(() => {
     const byId = new Map(project.tasks.map(t => [t.id, t]));
     const order = project.tasks.map(t => t.id).filter(id => !byId.get(id)?.parentId);
-    const rows: LayoutRow[] = [];
+    const out: Task[] = [];
     for (const id of order) {
       const root = byId.get(id)!;
-      rows.push({ kind: 'task', task: root });
+      out.push(root);
       if (!(root as any).isCollapsed) {
         const kids = childrenByParent.get(root.id) || [];
-        for (const k of kids) rows.push({ kind: 'task', task: k });
-        rows.push({ kind: 'addSub', parentId: root.id });
+        for (const k of kids) out.push(k);
       }
     }
-    rows.push({ kind: 'addTask' });
-    return rows;
+    // handle orphans (parent not found)
+    for (const t of project.tasks) {
+      if ((t as any).parentId && !byId.has((t as any).parentId!)) out.push(t);
+    }
+    return out;
   }, [project.tasks, childrenByParent]);
 
-  // Быстрые словари
-  const taskRowIndex: Record<string, number> = useMemo(() => {
-    const map: Record<string, number> = {};
-    layoutRows.forEach((r, i) => { if (r.kind === 'task') map[r.task.id] = i; });
-    return map;
-  }, [layoutRows]);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const barsRef = useRef<HTMLDivElement | null>(null);
@@ -108,13 +105,17 @@ export const GanttChart: React.FC<Props> = ({
       e = addDays(maxEnd, 7);
     }
 
+    // Возможность прокрутки до 31 декабря 2030
+    const capEnd = new Date(2030, 11, 31);
+    if (e < capEnd) e = capEnd;
+
     const days = Math.max(1, differenceInDays(e, s));
     return { start: s, end: e, totalDays: days };
   }, [project.tasks, project.milestones]);
 
   const contentWidth = totalDays * dayWidth;
 
-  // --- Сохранение положения при сдвиге дат ---
+  // --- Анти-рывок после переноса ---
   const snapshotLeftRef = useRef<number>(0);
   const snapshotStartRef = useRef<Date | null>(null);
   const needCompensateRef = useRef<boolean>(false);
@@ -135,19 +136,23 @@ export const GanttChart: React.FC<Props> = ({
   }, [start, dayWidth]);
 
   const onTaskUpdate = (taskId: string, updates: Partial<Task>) => {
-    if (scrollRef.current) snapshotLeftRef.current = scrollRef.current.scrollLeft;
+    if (scrollRef.current) {
+      snapshotLeftRef.current = scrollRef.current.scrollLeft;
+    }
     snapshotStartRef.current = start;
     needCompensateRef.current = true;
+
     const tasks = project.tasks.map(t => (t.id === taskId ? { ...t, ...updates } : t));
     onUpdateProject({ ...project, tasks });
   };
 
-  // Зависимости
+  // Добавление зависимости
   const addDependency = (fromId: string, toId: string) => {
     if (fromId === toId) return;
+
     const deps = project.dependencies || [];
-    if (deps.some(d => d.fromId === toId && d.toId === fromId)) return;
-    if (deps.some(d => d.fromId === fromId && d.toId === toId)) return;
+    if (deps.some(d => d.fromId === toId && d.toId === fromId)) return; // запрет обратной связи (loop)
+    if (deps.some(d => d.fromId === fromId && d.toId === toId)) return; // дубликат
 
     let tasks = project.tasks;
     const from = project.tasks.find(t => t.id === fromId);
@@ -163,10 +168,25 @@ export const GanttChart: React.FC<Props> = ({
         tasks = tasks.map((t, i) => (i === idx ? updated : t));
       }
     }
+
     const dep: TaskDependency = { id: String(Date.now()), fromId, toId, type: 'fs' };
     onUpdateProject({ ...project, tasks, dependencies: [...deps, dep] });
   };
 
+  const beginConnect = (taskId: string) => setConnectingFrom(taskId);
+  const pickTarget = (taskId: string) => {
+    if (connectingFrom) addDependency(connectingFrom, taskId);
+    setConnectingFrom(null);
+  };
+
+  // Индексы строк в текущем видимом порядке
+  const idToIndex: Record<string, number> = useMemo(() => {
+    const map: Record<string, number> = {};
+    visibleTasks.forEach((t, i) => { map[t.id] = i; });
+    return map;
+  }, [visibleTasks]);
+
+  // --- НОВОЕ: скрываем "+" на барах, уже связанных с источником (в любом направлении) ---
   const blockedTargets = useMemo(() => {
     const set = new Set<string>();
     if (!connectingFrom) return set;
@@ -178,12 +198,13 @@ export const GanttChart: React.FC<Props> = ({
     return set;
   }, [connectingFrom, project.dependencies]);
 
+  // Центровка бара по клику на строку слева
   const focusTask = (taskId: string) => {
     const container = scrollRef.current;
     const barsEl = barsRef.current;
     if (!container || !barsEl) return;
 
-    const idx = taskRowIndex[taskId];
+    const idx = idToIndex[taskId];
     const task = project.tasks.find(t => t.id === taskId);
     if (idx === undefined || idx === null || !task) return;
 
@@ -289,40 +310,36 @@ export const GanttChart: React.FC<Props> = ({
         <div style={{ minWidth: contentWidth }}>
           <Timeline startDate={start} endDate={end} dayWidth={dayWidth} unit={unit} />
 
-          <div className="relative" style={{ height: layoutRows.length * ROW_HEIGHT }} ref={barsRef}>
+          <div className="relative" style={{ height: visibleTasks.length * ROW_HEIGHT }} ref={barsRef}>
             <div className="absolute inset-0">
-              {layoutRows.map((row, i) => {
-                if (row.kind !== 'task') return null;
-                const t = row.task;
-                return (
-                  <div
-                    key={t.id}
-                    className="absolute left-0 right-0"
-                    style={{ top: i * ROW_HEIGHT, height: ROW_HEIGHT }}
-                  >
-                    <TaskBar
-                      task={t}
-                      asThinLine={!!project.tasks.find(x => (x as any).parentId === t.id)}
-                      projectStartDate={start}
-                      dayWidth={dayWidth}
-                      rowHeight={ROW_HEIGHT}
-                      onTaskUpdate={onTaskUpdate}
-                      showTargetHandles={!!connectingFrom && connectingFrom !== t.id && !blockedTargets.has(t.id)}
-                      onStartConnect={(((id: string) => setConnectingFrom(id)) as any)}
-                      onPickTarget={(((id: string) => { if (connectingFrom) addDependency(connectingFrom, id); setConnectingFrom(null); }) as any)}
-                      scrollContainer={scrollRef.current as HTMLDivElement | null}
-                    />
-                  </div>
-                );
-              })}
+              {visibleTasks.map((t, i) => (
+                <div
+                  key={t.id}
+                  className="absolute left-0 right-0"
+                  style={{ top: i * ROW_HEIGHT, height: ROW_HEIGHT }}
+                >
+                  <TaskBar
+                    task={t}
+                    asThinLine={hasChildren.has(t.id)}
+                    projectStartDate={start}
+                    dayWidth={dayWidth}
+                    rowHeight={ROW_HEIGHT}
+                    onTaskUpdate={onTaskUpdate}
+                    showTargetHandles={!!connectingFrom && connectingFrom !== t.id && !blockedTargets.has(t.id)}
+                    onStartConnect={(((id: string) => setConnectingFrom(id)) as any)}
+                    onPickTarget={(((id: string) => { if (connectingFrom) addDependency(connectingFrom, id); setConnectingFrom(null); }) as any)}
+                    scrollContainer={scrollRef.current as HTMLDivElement | null}
+                  />
+                </div>
+              ))}
 
               {(project.dependencies || []).map(d => {
                 const fromTask = project.tasks.find(t => t.id === d.fromId);
                 const toTask = project.tasks.find(t => t.id === d.toId);
                 if (!fromTask || !toTask) return null;
-                const fromIndex = taskRowIndex[fromTask.id];
-                const toIndex = taskRowIndex[toTask.id];
-                if (fromIndex === undefined || toIndex === undefined) return null;
+                const fromIndex = visibleTasks.findIndex(t => t.id === fromTask.id);
+                const toIndex = visibleTasks.findIndex(t => t.id === toTask.id);
+                if (fromIndex < 0 || toIndex < 0) return null;
                 return (
                   <TaskDependencyLine
                     key={d.id}
