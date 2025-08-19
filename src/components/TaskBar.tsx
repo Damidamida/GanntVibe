@@ -1,6 +1,15 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { Task } from '../types/gantt';
-import { differenceInDays, addDays } from '../utils/dateUtils';
+
+const toLocalStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const msPerDay = 24 * 60 * 60 * 1000;
+const diffDaysLocal = (a: Date, b: Date) =>
+  Math.round((toLocalStart(a).getTime() - toLocalStart(b).getTime()) / msPerDay);
+const addDaysLocal = (d: Date, n: number) => {
+  const base = toLocalStart(d);
+  base.setDate(base.getDate() + n);
+  return base;
+};
 
 interface Props {
   task: Task;
@@ -30,8 +39,8 @@ const TaskBar: React.FC<Props> = ({
   scrollContainer,
 }) => {
   const { left, width } = useMemo(() => {
-    const leftDays = Math.max(0, differenceInDays(task.startDate, projectStartDate));
-    const spanDays = Math.max(1, differenceInDays(task.endDate, task.startDate) + 1);
+    const leftDays = Math.max(0, diffDaysLocal(task.startDate, projectStartDate));
+    const spanDays = Math.max(1, diffDaysLocal(task.endDate, task.startDate) + 1);
     return { left: leftDays * dayWidth, width: spanDays * dayWidth };
   }, [task.startDate, task.endDate, projectStartDate, dayWidth]);
 
@@ -83,16 +92,16 @@ const TaskBar: React.FC<Props> = ({
 
     if (st.mode === 'move' && dDays) {
       onTaskUpdate((task as any).id, {
-        startDate: addDays(task.startDate, dDays),
-        endDate: addDays(task.endDate, dDays),
+        startDate: addDaysLocal(task.startDate, dDays),
+        endDate: addDaysLocal(task.endDate, dDays),
       });
     } else if (st.mode === 'resizeL' && lDays) {
-      const nextStart = addDays(task.startDate, lDays);
+      const nextStart = addDaysLocal(task.startDate, lDays);
       if (nextStart <= task.endDate) {
         onTaskUpdate((task as any).id, { startDate: nextStart });
       }
     } else if (st.mode === 'resizeR' && rDays) {
-      const nextEnd = addDays(task.endDate, rDays);
+      const nextEnd = addDaysLocal(task.endDate, rDays);
       if (nextEnd >= task.startDate) {
         onTaskUpdate((task as any).id, { endDate: nextEnd });
       }
@@ -106,14 +115,9 @@ const TaskBar: React.FC<Props> = ({
   const visualLeft = Math.round(left + preview.dx + (preview.dwLeft || 0));
   const visualWidth = Math.max(1, Math.round(width + (preview.dwRight || 0) - (preview.dwLeft || 0)));
 
-  // Хэндлы фиксированной ширины 10px внутри бара (по требованию)
   const edgeZone = 10;
   const plusOffset = 8;
 
-  const startConnect = (e: React.MouseEvent) => { e.stopPropagation(); onStartConnect && onStartConnect((task as any).id); };
-  const pickTarget = (e: React.MouseEvent) => { e.stopPropagation(); onPickTarget && onPickTarget((task as any).id); };
-
-  // Центровка знака “+”
   const plusClass = "flex items-center justify-center text-[11px] leading-none select-none";
 
   return (
@@ -121,15 +125,14 @@ const TaskBar: React.FC<Props> = ({
       className="absolute group"
       style={{ left: visualLeft, width: visualWidth, top, height: barH, zIndex: asThinLine ? 0 : 1 }}
     >
-      {/* сам бар */}
       <div
         className={'relative rounded border shadow-sm ' + 'cursor-grab active:cursor-grabbing'}
         style={{ backgroundColor: color, height: '100%', borderColor: 'rgba(0,0,0,0.25)' }}
         title={(task as any).name}
         onMouseDown={startDrag('move')}
-        onClick={(e) => { if (showTargetHandles) pickTarget(e); }}
+        onClick={() => {}}
       >
-        {/* зоны ресайза — ВНУТРИ бара */}
+        {/* внутренние хэндлы ресайза */}
         <div
           className="absolute top-0 left-0 h-full"
           style={{ width: edgeZone, cursor: 'ew-resize' }}
@@ -144,30 +147,30 @@ const TaskBar: React.FC<Props> = ({
         />
       </div>
 
-      {/* "+" для старта связи — остаются как были */}
+      {/* Боковые '+' — старт связи */}
       {!asThinLine && !showTargetHandles && (
         <>
           <button
             className={`absolute top-1/2 -translate-y-1/2 -left-2 w-4 h-4 rounded-full border shadow-sm bg-background opacity-0 group-hover:opacity-100 focus:opacity-100 ${plusClass}`}
             style={{ marginLeft: -plusOffset, zIndex: 5 }}
-            onClick={startConnect}
+            onClick={(e) => { e.stopPropagation(); onStartConnect && onStartConnect((task as any).id); }}
             title="Начать связь"
           >+</button>
           <button
             className={`absolute top-1/2 -translate-y-1/2 -right-2 w-4 h-4 rounded-full border shadow-sm bg-background opacity-0 group-hover:opacity-100 focus:opacity-100 ${plusClass}`}
             style={{ marginRight: -plusOffset, zIndex: 5 }}
-            onClick={startConnect}
+            onClick={(e) => { e.stopPropagation(); onStartConnect && onStartConnect((task as any).id); }}
             title="Начать связь"
           >+</button>
         </>
       )}
 
-      {/* Режим выбора цели — верхний “+” */}
+      {/* Верхний '+' — выбор цели, когда активен режим связи */}
       {!asThinLine && showTargetHandles && (
         <button
           className={`absolute -top-3 left-1/2 -translate-x-1/2 w-4 h-4 rounded-full border shadow-sm bg-background opacity-70 hover:opacity-100 ${plusClass}`}
           style={{ zIndex: 5 }}
-          onClick={pickTarget}
+          onClick={(e) => { e.stopPropagation(); onPickTarget && onPickTarget((task as any).id); }}
           title="Связать сюда"
         >+</button>
       )}
@@ -175,6 +178,5 @@ const TaskBar: React.FC<Props> = ({
   );
 };
 
-// Экспорт и как default, и как именованный — чтобы не менять существующие импорты
 export { TaskBar };
 export default TaskBar;
