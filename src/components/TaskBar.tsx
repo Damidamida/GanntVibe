@@ -22,6 +22,8 @@ interface Props {
   onStartConnect?: (taskId: string) => void;
   onPickTarget?: (taskId: string) => void;
   scrollContainer?: HTMLDivElement | null;
+  /** Новый флаг: если у задачи есть хотя бы одна связь (входящая или исходящая) */
+  hasAnyDependency?: boolean;
 }
 
 type DragMode = 'move' | 'resizeL' | 'resizeR';
@@ -37,6 +39,7 @@ const TaskBar: React.FC<Props> = ({
   onStartConnect,
   onPickTarget,
   scrollContainer,
+  hasAnyDependency = false,
 }) => {
   const { left, width } = useMemo(() => {
     const leftDays = Math.max(0, diffDaysLocal(task.startDate, projectStartDate));
@@ -117,8 +120,7 @@ const TaskBar: React.FC<Props> = ({
 
   const edgeZone = 10;
   const sideOffset = 10; // внешний вылет кружков для связи
-
-  const circleBase = "w-4 h-4 rounded-full border shadow-sm bg-background"; // пустой круг
+  const circleBase = "w-4 h-4 rounded-full border shadow-sm bg-background";
   const circleHover = "opacity-0 group-hover:opacity-100 focus:opacity-100";
   const circlePos = "absolute top-1/2 -translate-y-1/2";
 
@@ -149,16 +151,19 @@ const TaskBar: React.FC<Props> = ({
         />
       </div>
 
-      {/* Боковые кружки — запуск связи */}
+      {/* Боковые кружки — запуск связи (без '+').
+          Левый скрываем, если у задачи есть хотя бы одна связь. */}
       {!asThinLine && !showTargetHandles && (
         <>
-          <button
-            className={`${circlePos} -left-2 ${circleBase} ${circleHover}`}
-            style={{ marginLeft: -sideOffset, zIndex: 5 }}
-            onClick={(e) => { e.stopPropagation(); onStartConnect && onStartConnect((task as any).id); }}
-            title="Связать"
-            aria-label="Связать"
-          />
+          {!hasAnyDependency && (
+            <button
+              className={`${circlePos} -left-2 ${circleBase} ${circleHover}`}
+              style={{ marginLeft: -sideOffset, zIndex: 5 }}
+              onClick={(e) => { e.stopPropagation(); onStartConnect && onStartConnect((task as any).id); }}
+              title="Связать"
+              aria-label="Связать"
+            />
+          )}
           <button
             className={`${circlePos} -right-2 ${circleBase} ${circleHover}`}
             style={{ marginRight: -sideOffset, zIndex: 5 }}

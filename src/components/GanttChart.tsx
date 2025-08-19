@@ -436,6 +436,7 @@ export const GanttChart: React.FC<Props> = ({
                       dayWidth={dayWidth}
                       rowHeight={ROW_HEIGHT}
                       onTaskUpdate={onTaskUpdate}
+                      hasAnyDependency={(project.dependencies || []).some(d => d.fromId === t.id || d.toId === t.id)}
                       showTargetHandles={!!connectingFrom && connectingFrom !== t.id && !blockedTargets.has(t.id)}
                       onStartConnect={(((id: string) => setConnectingFrom(id)) as any)}
                       onPickTarget={(((id: string) => { if (connectingFrom) addDependency(connectingFrom, id); setConnectingFrom(null); }) as any)}
