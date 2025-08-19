@@ -15,11 +15,11 @@ interface Props {
   scrollContainer?: HTMLDivElement | null;
 }
 
-type DragMode = 'move' | 'resizeL' | 'resizeR' | null;
+type DragMode = 'move' | 'resizeL' | 'resizeR';
 
-export const TaskBar: React.FC<Props> = ({
+const TaskBar: React.FC<Props> = ({
   task,
-  asThinLine = false,
+  asThinLine,
   projectStartDate,
   dayWidth,
   rowHeight,
@@ -37,7 +37,7 @@ export const TaskBar: React.FC<Props> = ({
 
   const barH = asThinLine ? Math.max(2, Math.round(rowHeight * 0.2)) : Math.round(rowHeight * 0.6);
   const top = Math.max(0, Math.round((rowHeight - barH) / 2));
-  const color = task.color || '#4f46e5';
+  const color = (task as any).color || '#4f46e5';
 
   const [preview, setPreview] = useState<{ dx: number; dwLeft: number; dwRight: number }>({ dx: 0, dwLeft: 0, dwRight: 0 });
   const previewRef = useRef(preview);
@@ -70,6 +70,8 @@ export const TaskBar: React.FC<Props> = ({
     else if (st.mode === 'resizeR') setPrev({ dwRight: dxPx });
   };
 
+  const resetPreview = () => setPrev({ dx: 0, dwLeft: 0, dwRight: 0 });
+
   const onUp = () => {
     const st = dragRef.current;
     const cur = previewRef.current;
@@ -79,14 +81,21 @@ export const TaskBar: React.FC<Props> = ({
     const lDays = Math.round(cur.dwLeft / dayWidth);
     const rDays = Math.round(cur.dwRight / dayWidth);
 
-    if (st.mode === 'move' && dDays !== 0) onTaskUpdate(task.id, { startDate: addDays(task.startDate, dDays), endDate: addDays(task.endDate, dDays) });
-    if (st.mode === 'resizeL' && lDays !== 0) {
-      const newStart = addDays(task.startDate, lDays);
-      onTaskUpdate(task.id, { startDate: newStart > task.endDate ? new Date(task.endDate) : newStart });
-    }
-    if (st.mode === 'resizeR' && rDays !== 0) {
-      const newEnd = addDays(task.endDate, rDays);
-      onTaskUpdate(task.id, { endDate: newEnd < task.startDate ? new Date(task.startDate) : newEnd });
+    if (st.mode === 'move' && dDays) {
+      onTaskUpdate((task as any).id, {
+        startDate: addDays(task.startDate, dDays),
+        endDate: addDays(task.endDate, dDays),
+      });
+    } else if (st.mode === 'resizeL' && lDays) {
+      const nextStart = addDays(task.startDate, lDays);
+      if (nextStart <= task.endDate) {
+        onTaskUpdate((task as any).id, { startDate: nextStart });
+      }
+    } else if (st.mode === 'resizeR' && rDays) {
+      const nextEnd = addDays(task.endDate, rDays);
+      if (nextEnd >= task.startDate) {
+        onTaskUpdate((task as any).id, { endDate: nextEnd });
+      }
     }
 
     resetPreview();
@@ -94,53 +103,58 @@ export const TaskBar: React.FC<Props> = ({
     window.removeEventListener('mousemove', onMove);
   };
 
-  const resetPreview = () => { previewRef.current = { dx: 0, dwLeft: 0, dwRight: 0 }; setPreview(previewRef.current); };
+  const visualLeft = Math.round(left + preview.dx + (preview.dwLeft || 0));
+  const visualWidth = Math.max(1, Math.round(width + (preview.dwRight || 0) - (preview.dwLeft || 0)));
 
-  const visualLeft = left + (dragRef.current?.mode === 'move' ? preview.dx : 0) + (dragRef.current?.mode === 'resizeL' ? preview.dwLeft : 0);
-  const visualWidth = Math.max(4, width + (dragRef.current?.mode === 'resizeR' ? preview.dwRight : 0) - (dragRef.current?.mode === 'resizeL' ? preview.dwLeft : 0));
-
-  const edgeZone = Math.max(6, Math.floor(dayWidth / 3));
+  // Хэндлы фиксированной ширины 10px внутри бара (по требованию)
+  const edgeZone = 10;
   const plusOffset = 8;
 
-  const startConnect = (e: React.MouseEvent) => { e.stopPropagation(); onStartConnect && onStartConnect(task.id); };
-  const pickTarget = (e: React.MouseEvent) => { e.stopPropagation(); onPickTarget && onPickTarget(task.id); };
+  const startConnect = (e: React.MouseEvent) => { e.stopPropagation(); onStartConnect && onStartConnect((task as any).id); };
+  const pickTarget = (e: React.MouseEvent) => { e.stopPropagation(); onPickTarget && onPickTarget((task as any).id); };
 
-  // Общий набор классов для круглых кнопок “+”, чтобы знак был строго по центру
+  // Центровка знака “+”
   const plusClass = "flex items-center justify-center text-[11px] leading-none select-none";
 
   return (
-    <div className="absolute group" style={{ left: visualLeft, width: visualWidth, top, height: barH, zIndex: asThinLine ? 0 : 1 }}>
+    <div
+      className="absolute group"
+      style={{ left: visualLeft, width: visualWidth, top, height: barH, zIndex: asThinLine ? 0 : 1 }}
+    >
       {/* сам бар */}
       <div
-        className={'rounded border shadow-sm ' + 'cursor-grab active:cursor-grabbing'}
+        className={'relative rounded border shadow-sm ' + 'cursor-grab active:cursor-grabbing'}
         style={{ backgroundColor: color, height: '100%', borderColor: 'rgba(0,0,0,0.25)' }}
-        title={task.name}
+        title={(task as any).name}
         onMouseDown={startDrag('move')}
         onClick={(e) => { if (showTargetHandles) pickTarget(e); }}
-      />
-      {/* зоны ресайза */}
-      <div
-        className="absolute top-0 left-0 h-full"
-        style={{ width: edgeZone, cursor: 'ew-resize' }}
-        onMouseDown={startDrag('resizeL')}
-      />
-      <div
-        className="absolute top-0 right-0 h-full"
-        style={{ width: edgeZone, cursor: 'ew-resize' }}
-        onMouseDown={startDrag('resizeR')}
-      />
+      >
+        {/* зоны ресайза — ВНУТРИ бара */}
+        <div
+          className="absolute top-0 left-0 h-full"
+          style={{ width: edgeZone, cursor: 'ew-resize' }}
+          onMouseDown={startDrag('resizeL')}
+          onClick={(e) => e.stopPropagation()}
+        />
+        <div
+          className="absolute top-0 right-0 h-full"
+          style={{ width: edgeZone, cursor: 'ew-resize' }}
+          onMouseDown={startDrag('resizeR')}
+          onClick={(e) => e.stopPropagation()}
+        />
+      </div>
 
-      {/* "+" для старта связи — на обоих краях, строго по центру круга */}
-      {!asThinLine && (
+      {/* "+" для старта связи — остаются как были */}
+      {!asThinLine && !showTargetHandles && (
         <>
           <button
-            className={`absolute top-1/2 -translate-y-1/2 -left-2 w-4 h-4 rounded-full border bg-background hover:bg-accent opacity-0 group-hover:opacity-100 focus:opacity-100 ${plusClass}`}
+            className={`absolute top-1/2 -translate-y-1/2 -left-2 w-4 h-4 rounded-full border shadow-sm bg-background opacity-0 group-hover:opacity-100 focus:opacity-100 ${plusClass}`}
             style={{ marginLeft: -plusOffset, zIndex: 5 }}
             onClick={startConnect}
             title="Начать связь"
           >+</button>
           <button
-            className={`absolute top-1/2 -translate-y-1/2 -right-2 w-4 h-4 rounded-full border bg-background hover:bg-accent opacity-0 group-hover:opacity-100 focus:opacity-100 ${plusClass}`}
+            className={`absolute top-1/2 -translate-y-1/2 -right-2 w-4 h-4 rounded-full border shadow-sm bg-background opacity-0 group-hover:opacity-100 focus:opacity-100 ${plusClass}`}
             style={{ marginRight: -plusOffset, zIndex: 5 }}
             onClick={startConnect}
             title="Начать связь"
@@ -148,10 +162,10 @@ export const TaskBar: React.FC<Props> = ({
         </>
       )}
 
-      {/* Режим выбора цели — тусклый "+" сверху центра; тоже центрируем */}
+      {/* Режим выбора цели — верхний “+” */}
       {!asThinLine && showTargetHandles && (
         <button
-          className={`absolute -top-3 left-1/2 -translate-x-1/2 w-4 h-4 rounded-full border bg-background opacity-70 hover:opacity-100 ${plusClass}`}
+          className={`absolute -top-3 left-1/2 -translate-x-1/2 w-4 h-4 rounded-full border shadow-sm bg-background opacity-70 hover:opacity-100 ${plusClass}`}
           style={{ zIndex: 5 }}
           onClick={pickTarget}
           title="Связать сюда"
@@ -161,4 +175,6 @@ export const TaskBar: React.FC<Props> = ({
   );
 };
 
+// Экспорт и как default, и как именованный — чтобы не менять существующие импорты
+export { TaskBar };
 export default TaskBar;

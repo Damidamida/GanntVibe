@@ -4,6 +4,7 @@ import { Timeline } from './Timeline';
 import { TaskBar } from './TaskBar';
 import { TaskList } from './TaskList';
 import { TaskDependencyLine } from './TaskDependencyLine';
+import { GridOverlay } from './GridOverlay';
 import { addDays, differenceInDays } from '../utils/dateUtils';
 
 interface Props {
@@ -16,7 +17,7 @@ interface Props {
 
 const ROW_HEIGHT = 32;
 const DAY_WIDTHS: Record<TimelineUnit, number> = { day: 24, week: 12, month: 4 };
-const HEADER_HEIGHT = 49;
+const HEADER_HEIGHT = 54;
 
 type LayoutRow =
   | { kind: 'task'; task: Task }
@@ -165,7 +166,7 @@ export const GanttChart: React.FC<Props> = ({
 
     const days = Math.max(1, differenceInDays(e, s));
     return { start: s, end: e, totalDays: days };
-  }, [project.tasks, project.milestones]);
+  }, []);
 
   const contentWidth = totalDays * dayWidth;
 
@@ -374,6 +375,14 @@ export const GanttChart: React.FC<Props> = ({
 
           <div className="relative" style={{ height: layoutRows.length * ROW_HEIGHT }} ref={barsRef}>
             <div className="absolute inset-0">
+              <GridOverlay
+                startDate={start}
+                endDate={end}
+                unit={unit}
+                dayWidth={dayWidth}
+                height={layoutRows.length * ROW_HEIGHT}
+              />
+
               {layoutRows.map((row, i) => {
                 if (row.kind !== 'task') return null;
                 const t = row.task;
