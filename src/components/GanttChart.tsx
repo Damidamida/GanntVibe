@@ -198,6 +198,10 @@ export const GanttChart: React.FC<Props> = ({
     onUpdateProject({ ...project, tasks });
   };
 
+  // Helpers for local start-of-day and one day in ms
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
   const addDependency = (fromId: string, toId: string) => {
     if (fromId === toId) return;
     const deps = project.dependencies || [];
@@ -210,10 +214,14 @@ export const GanttChart: React.FC<Props> = ({
 
     if (from && idx >= 0) {
       const tgt = project.tasks[idx];
-      if (tgt.startDate.getTime() < from.endDate.getTime()) {
-        const shiftMs = from.endDate.getTime() - tgt.startDate.getTime();
-        const newStart = new Date(tgt.startDate.getTime() + shiftMs);
-        const newEnd = new Date(tgt.endDate.getTime() + shiftMs);
+      // Выровнять по правилу FS: если цель начинается раньше или в день окончания источника,
+      // сместить цель так, чтобы её старт был на следующий день после конца источника.
+      const fromEnd = startOfDay(from.endDate);
+      const tgtStart = startOfDay(tgt.startDate);
+      if (tgtStart.getTime() <= fromEnd.getTime()) {
+        const durationMs = startOfDay(tgt.endDate).getTime() - tgtStart.getTime();
+        const newStart = new Date(fromEnd.getTime() + ONE_DAY_MS);
+        const newEnd = new Date(newStart.getTime() + durationMs);
         const updated = { ...tgt, startDate: newStart, endDate: newEnd };
         tasks = tasks.map((t, i) => (i === idx ? updated : t));
       }

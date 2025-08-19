@@ -1,6 +1,5 @@
 import React, { useMemo } from 'react';
 import { Task, TaskDependency } from '../types/gantt';
-import { differenceInDays } from '../utils/dateUtils';
 
 interface Props {
   dependency: TaskDependency;
@@ -14,6 +13,11 @@ interface Props {
   selected?: boolean;
   onSelect?: (id: string) => void;
 }
+
+// Локальные «целые» дни — как в TaskBar, чтобы не было расхождений по пикселям
+const toLocalStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const diffDaysLocal = (a: Date, b: Date) =>
+  Math.round((toLocalStart(a).getTime() - toLocalStart(b).getTime()) / (24 * 60 * 60 * 1000));
 
 export const TaskDependencyLine: React.FC<Props> = ({
   dependency,
@@ -31,20 +35,21 @@ export const TaskDependencyLine: React.FC<Props> = ({
     const yFrom = fromIndex * rowHeight + rowHeight / 2;
     const yTo = toIndex * rowHeight + rowHeight / 2;
 
-    const xFromLeft = differenceInDays(fromTask.startDate, projectStartDate) * dayWidth;
-    const xFromRight = (differenceInDays(fromTask.endDate, projectStartDate) + 1) * dayWidth;
+    // Координаты по той же формуле, что и бар
+    const fromLeft = Math.round(diffDaysLocal(fromTask.startDate, projectStartDate) * dayWidth);
+    const fromWidth = Math.round((diffDaysLocal(fromTask.endDate, fromTask.startDate) + 1) * dayWidth);
+    const xFromRight = fromLeft + fromWidth;
 
-    const xToLeft = differenceInDays(toTask.startDate, projectStartDate) * dayWidth;
-    // Стратегия FS: выходим из правого края источника, зазор 6px, затем «манхэттеном» к левому краю цели
-    const gap = 6;
-    const x1 = xFromRight;               // старт по X
-    const x2 = x1 + gap;                  // небольшой отход вправо
-    const yMid = yTo;                     // вертикальная цель
-    const x3 = xToLeft - gap;             // подходим к цели слева
-    const x4 = xToLeft;                   // входим в цель
+    const xToLeft = Math.round(diffDaysLocal(toTask.startDate, projectStartDate) * dayWidth);
 
-    return { x1, x2, x3, x4, yFrom, yMid, yTo };
-  }, [fromTask, toTask, projectStartDate, dayWidth, fromIndex, toIndex, rowHeight]);
+    const gap = 6; // небольшой вынос вправо от бара, как было визуально
+    const x1 = xFromRight;
+    const x2 = x1 + gap;
+    const yMid = yTo;
+    const x4 = xToLeft;
+
+    return { x1, x2, x4, yFrom, yMid, yTo };
+  }, [fromTask.startDate, fromTask.endDate, toTask.startDate, projectStartDate, dayWidth, fromIndex, toIndex, rowHeight]);
 
   const color = selected ? '#0ea5e9' : '#94a3b8';
   const strokeW = selected ? 2.5 : 1.5;
@@ -62,11 +67,8 @@ export const TaskDependencyLine: React.FC<Props> = ({
         </marker>
       </defs>
 
-      {/* Горизонталь от правого края источника */}
       <line x1={points.x1} y1={points.yFrom} x2={points.x2} y2={points.yFrom} stroke={color} strokeWidth={strokeW} className="pointer-events-auto" onClick={handleClick} />
-      {/* Вертикаль к строке цели */}
       <line x1={points.x2} y1={points.yFrom} x2={points.x2} y2={points.yMid} stroke={color} strokeWidth={strokeW} className="pointer-events-auto" onClick={handleClick} />
-      {/* Горизонталь к левому краю цели со стрелкой */}
       <line x1={points.x2} y1={points.yTo} x2={points.x4} y2={points.yTo} stroke={color} strokeWidth={strokeW} markerEnd="url(#arrow)" className="pointer-events-auto" onClick={handleClick} />
     </svg>
   );
