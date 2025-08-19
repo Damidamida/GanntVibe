@@ -191,3 +191,12 @@
 html {
   font-size: var(--font-size);
 }
+
+
+/* ensure gantt bars are above overlays and have bigger hitbox for thin bars */
+.gantt-taskbar { z-index: 30; }
+.gantt-taskbar--thin::before { content: none; }
+
+
+/* Thin bar dragzone */
+.gantt-thin-dragzone { display: none; }
