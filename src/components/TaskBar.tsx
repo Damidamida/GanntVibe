@@ -116,9 +116,11 @@ const TaskBar: React.FC<Props> = ({
   const visualWidth = Math.max(1, Math.round(width + (preview.dwRight || 0) - (preview.dwLeft || 0)));
 
   const edgeZone = 10;
-  const plusOffset = 8;
+  const sideOffset = 10; // внешний вылет кружков для связи
 
-  const plusClass = "flex items-center justify-center text-[11px] leading-none select-none";
+  const circleBase = "w-4 h-4 rounded-full border shadow-sm bg-background"; // пустой круг
+  const circleHover = "opacity-0 group-hover:opacity-100 focus:opacity-100";
+  const circlePos = "absolute top-1/2 -translate-y-1/2";
 
   return (
     <div
@@ -147,32 +149,35 @@ const TaskBar: React.FC<Props> = ({
         />
       </div>
 
-      {/* Боковые '+' — старт связи */}
+      {/* Боковые кружки — запуск связи */}
       {!asThinLine && !showTargetHandles && (
         <>
           <button
-            className={`absolute top-1/2 -translate-y-1/2 -left-2 w-4 h-4 rounded-full border shadow-sm bg-background opacity-0 group-hover:opacity-100 focus:opacity-100 ${plusClass}`}
-            style={{ marginLeft: -plusOffset, zIndex: 5 }}
+            className={`${circlePos} -left-2 ${circleBase} ${circleHover}`}
+            style={{ marginLeft: -sideOffset, zIndex: 5 }}
             onClick={(e) => { e.stopPropagation(); onStartConnect && onStartConnect((task as any).id); }}
-            title="Начать связь"
-          >+</button>
+            title="Связать"
+            aria-label="Связать"
+          />
           <button
-            className={`absolute top-1/2 -translate-y-1/2 -right-2 w-4 h-4 rounded-full border shadow-sm bg-background opacity-0 group-hover:opacity-100 focus:opacity-100 ${plusClass}`}
-            style={{ marginRight: -plusOffset, zIndex: 5 }}
+            className={`${circlePos} -right-2 ${circleBase} ${circleHover}`}
+            style={{ marginRight: -sideOffset, zIndex: 5 }}
             onClick={(e) => { e.stopPropagation(); onStartConnect && onStartConnect((task as any).id); }}
-            title="Начать связь"
-          >+</button>
+            title="Связать"
+            aria-label="Связать"
+          />
         </>
       )}
 
-      {/* Верхний '+' — выбор цели, когда активен режим связи */}
+      {/* Верхний кружок — выбор цели (top: -20px) */}
       {!asThinLine && showTargetHandles && (
         <button
-          className={`absolute -top-3 left-1/2 -translate-x-1/2 w-4 h-4 rounded-full border shadow-sm bg-background opacity-70 hover:opacity-100 ${plusClass}`}
-          style={{ zIndex: 5 }}
+          className={`absolute left-1/2 -translate-x-1/2 ${circleBase}`}
+          style={{ zIndex: 5, top: -20 }}
           onClick={(e) => { e.stopPropagation(); onPickTarget && onPickTarget((task as any).id); }}
           title="Связать сюда"
-        >+</button>
+          aria-label="Связать сюда"
+        />
       )}
     </div>
   );

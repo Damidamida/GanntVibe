@@ -5,6 +5,8 @@ import { TaskBar } from './TaskBar';
 import { TaskList } from './TaskList';
 import { TaskDependencyLine } from './TaskDependencyLine';
 import { GridOverlay } from './GridOverlay';
+import { Button } from './ui/button';
+import { Trash2 } from 'lucide-react';
 import { addDays, differenceInDays } from '../utils/dateUtils';
 
 interface Props {
@@ -47,7 +49,6 @@ export const GanttChart: React.FC<Props> = ({
     const tasks = [...project.tasks];
     let changed = false;
 
-    // group by parent
     const groups = new Map<string, Task[]>();
     for (const t of tasks) {
       const key = parentKey(t);
@@ -56,10 +57,7 @@ export const GanttChart: React.FC<Props> = ({
       groups.set(key, arr);
     }
 
-    // within each group, assign orderIndex if missing, preserving current relative order
     for (const [key, arr] of groups) {
-      // preserve existing explicit orderIndex; otherwise keep current appearance order
-      // sort by existing orderIndex first to stabilize legacy inconsistent values
       const hasAny = arr.some(t => (t as any).orderIndex !== undefined && (t as any).orderIndex !== null);
       let sorted = arr.slice();
       if (hasAny) {
@@ -87,7 +85,6 @@ export const GanttChart: React.FC<Props> = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Map parent -> children (sorted ONLY by orderIndex)
   const childrenByParent = useMemo(() => {
     const map = new Map<string, Task[]>();
     for (const t of project.tasks) {
@@ -104,7 +101,6 @@ export const GanttChart: React.FC<Props> = ({
     return map;
   }, [project.tasks]);
 
-  // Roots strictly by orderIndex
   const roots = useMemo(() => {
     return project.tasks
       .filter(t => !(t as any).parentId)
@@ -112,8 +108,7 @@ export const GanttChart: React.FC<Props> = ({
       .sort((a,b) => ((a as any).orderIndex ?? 0) - ((b as any).orderIndex ?? 0));
   }, [project.tasks]);
 
-  // Visible layout rows
-  const layoutRows: LayoutRow[] = useMemo(() => {
+  const layoutRows = useMemo(() => {
     const rows: LayoutRow[] = [];
     for (const root of roots) {
       rows.push({ kind: 'task', task: root });
@@ -128,7 +123,6 @@ export const GanttChart: React.FC<Props> = ({
     return rows;
   }, [roots, project.milestones, childrenByParent]);
 
-  // indices
   const taskRowIndex: Record<string, number> = useMemo(() => {
     const map: Record<string, number> = {};
     layoutRows.forEach((r, i) => { if (r.kind === 'task') map[r.task.id] = i; });
@@ -161,16 +155,13 @@ export const GanttChart: React.FC<Props> = ({
       s = addDays(minStart, -60);
     }
 
-    // fixed right edge: 31.12.2030
     const e = new Date(2030, 11, 31);
-
     const days = Math.max(1, differenceInDays(e, s));
     return { start: s, end: e, totalDays: days };
   }, []);
 
   const contentWidth = totalDays * dayWidth;
 
-  // --- keep scroll position after date shifts ---
   const snapshotLeftRef = useRef<number>(0);
   const snapshotStartRef = useRef<Date | null>(null);
   const needCompensateRef = useRef<boolean>(false);
@@ -198,7 +189,6 @@ export const GanttChart: React.FC<Props> = ({
     onUpdateProject({ ...project, tasks });
   };
 
-  // Helpers for local start-of-day and one day in ms
   const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -214,8 +204,6 @@ export const GanttChart: React.FC<Props> = ({
 
     if (from && idx >= 0) {
       const tgt = project.tasks[idx];
-      // Выровнять по правилу FS: если цель начинается раньше или в день окончания источника,
-      // сместить цель так, чтобы её старт был на следующий день после конца источника.
       const fromEnd = startOfDay(from.endDate);
       const tgtStart = startOfDay(tgt.startDate);
       if (tgtStart.getTime() <= fromEnd.getTime()) {
@@ -277,6 +265,9 @@ export const GanttChart: React.FC<Props> = ({
         const deps = (project.dependencies || []).filter(d => d.id !== selectedDepId);
         onUpdateProject({ ...project, dependencies: deps });
         setSelectedDepId(null);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setSelectedDepId(null);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -298,21 +289,61 @@ export const GanttChart: React.FC<Props> = ({
     document.addEventListener('mouseup', onUp);
   };
 
-  // helpers to compute next orderIndex
-  const nextIndexForRoot = () => {
-    const roots = project.tasks.filter(t => !(t as any).parentId);
-    return Math.max(-1, ...roots.map(t => (t as any).orderIndex ?? -1)) + 1;
+  const handleDeleteAll = () => {
+    if (project.tasks.length === 0) return;
+    const ok = confirm('Удалить все задачи и подзадачи? Действие необратимо.');
+    if (!ok) return;
+    setConnectingFrom(null);
+    setSelectedDepId(null);
+    onUpdateProject({ ...project, tasks: [], dependencies: [] });
   };
-  const nextIndexForParent = (parentId: string) => {
-    const kids = project.tasks.filter(t => (t as any).parentId === parentId);
-    return Math.max(-1, ...kids.map(t => (t as any).orderIndex ?? -1)) + 1;
+
+  // --- Build sibling indices for fan-out per fromId ---
+  const depsByFrom = useMemo(() => {
+    const map = new Map<string, TaskDependency[]>();
+    for (const d of project.dependencies || []) {
+      const arr = map.get(d.fromId) || [];
+      arr.push(d);
+      map.set(d.fromId, arr);
+    }
+    // Sort siblings by toIndex to keep order stable
+    for (const [k, arr] of map) {
+      arr.sort((a,b) => {
+        const ai = taskRowIndex[a.toId] ?? 0;
+        const bi = taskRowIndex[b.toId] ?? 0;
+        return ai - bi;
+      });
+    }
+    return map;
+  }, [project.dependencies, taskRowIndex]);
+
+  const handleDeleteDep = (depId: string) => {
+    const deps = (project.dependencies || []).filter(d => d.id !== depId);
+    onUpdateProject({ ...project, dependencies: deps });
+    if (selectedDepId === depId) setSelectedDepId(null);
   };
 
   return (
     <div className="h-full w-full flex">
       {/* Левая панель */}
       <div className="border-r overflow-auto" style={{ width: listWidth }}>
-        <div style={{ height: HEADER_HEIGHT }} />
+        {/* Sticky header с кнопкой Удалить всё */}
+        <div
+          className="sticky top-0 z-20 bg-background border-b flex items-center px-3"
+          style={{ height: HEADER_HEIGHT }}
+        >
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={handleDeleteAll}
+            disabled={project.tasks.length === 0}
+            className="uppercase tracking-wide"
+            title="Удалить все задачи"
+          >
+            <Trash2 className="w-4 h-4 mr-2" /> Удалить всё
+          </Button>
+        </div>
+
         <TaskList
           tasks={project.tasks}
           milestones={project.milestones}
@@ -327,10 +358,8 @@ export const GanttChart: React.FC<Props> = ({
             onUpdateProject({ ...project, milestones: project.milestones.filter(m => m.id !== id) })
           }
           onReorderTasks={newTasks => {
-            // если когда-то включим DnD слева — пересчитаем orderIndex в каждой группе
             const tasks = [...project.tasks];
             const byId = new Map(tasks.map(t => [t.id, t]));
-            // собрать группы из newTasks по parentId
             const groups = new Map<string, Task[]>();
             for (const t of newTasks) {
               const orig = byId.get(t.id);
@@ -350,14 +379,14 @@ export const GanttChart: React.FC<Props> = ({
           onCreateTask={(name) => {
             const today = new Date();
             const t: Task = { id: 't-' + Math.random().toString(36).slice(2), name, startDate: today, endDate: addDays(today, 5), progress: 0, priority: 1, assignee: '', color: '#4f46e5' };
-            (t as any).orderIndex = nextIndexForRoot();
+            (t as any).orderIndex = Math.max(-1, ...project.tasks.filter(x => !(x as any).parentId).map(x => (x as any).orderIndex ?? -1)) + 1;
             onUpdateProject({ ...project, tasks: [...project.tasks, t] });
           }}
           onCreateSubtask={(parentId, name) => {
             const today = new Date();
             const st = today; const en = addDays(today, 5);
             const t: Task = { id: 't-' + Math.random().toString(36).slice(2), name, startDate: st, endDate: en, progress: 0, priority: 1, assignee: '', color: '#10b981', parentId } as any;
-            (t as any).orderIndex = nextIndexForParent(parentId);
+            (t as any).orderIndex = Math.max(-1, ...project.tasks.filter(x => (x as any).parentId === parentId).map(x => (x as any).orderIndex ?? -1)) + 1;
             const parentIdx = project.tasks.findIndex(x => x.id === parentId);
             const parent = parentIdx >=0 ? project.tasks[parentIdx] : undefined;
             const updatedParent = parent ? { ...parent, isCollapsed: false } : undefined;
@@ -423,6 +452,9 @@ export const GanttChart: React.FC<Props> = ({
                 const fromIndex = taskRowIndex[fromTask.id];
                 const toIndex = taskRowIndex[toTask.id];
                 if (fromIndex === undefined || toIndex === undefined) return null;
+                const siblings = depsByFrom.get(d.fromId) || [];
+                const siblingIndex = siblings.findIndex(x => x.id === d.id);
+                const siblingCount = siblings.length;
                 return (
                   <TaskDependencyLine
                     key={d.id}
@@ -436,6 +468,9 @@ export const GanttChart: React.FC<Props> = ({
                     rowHeight={ROW_HEIGHT}
                     selected={selectedDepId === d.id}
                     onSelect={(id) => setSelectedDepId(id)}
+                    onDelete={handleDeleteDep}
+                    siblingIndex={siblingIndex}
+                    siblingCount={siblingCount}
                   />
                 );
               })}
