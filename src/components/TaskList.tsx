@@ -94,15 +94,34 @@ export const TaskList: React.FC<TaskListProps> = ({
                   <MoreHorizontal className="w-4 h-4" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem onClick={() => setAddingSubParent(t.id)}>
+              {/* Меню: белый фон, тень, без скруглений */}
+              <DropdownMenuContent
+                align="end"
+                sideOffset={6}
+                className="w-56 bg-white border border-gray-200 shadow-[0_8px_24px_rgba(0,0,0,0.18)] rounded-none py-1 z-50"
+              >
+                <DropdownMenuItem
+                  className="rounded-none px-3 py-2 cursor-pointer hover:bg-gray-100"
+                  onClick={() => setAddingSubParent(t.id)}
+                >
                   Создать подзадачу
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => { if (confirm('Удалить задачу и все её подзадачи?')) onDeleteTask(t.id); }} className="text-destructive">
+                <DropdownMenuItem
+                  className="rounded-none px-3 py-2 cursor-pointer hover:bg-gray-100 text-destructive"
+                  onClick={() => {
+                    // Подтверждение только если у задачи есть подзадачи
+                    if (hasChildren(t.id)) {
+                      if (confirm('Удалить задачу и все её подзадачи?')) onDeleteTask(t.id);
+                    } else {
+                      onDeleteTask(t.id);
+                    }
+                  }}
+                >
                   Удалить
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+
           </div>
 
           {/* Children */}
@@ -110,10 +129,10 @@ export const TaskList: React.FC<TaskListProps> = ({
             <div
               key={c.id}
               className="grid grid-cols-[auto,1fr,auto,auto] items-center gap-2 hover:bg-accent/20 border-b relative"
-              style={{ height: rowHeight, paddingLeft: '28px' }}  /* Явный отступ для подзадач */
+              style={{ height: rowHeight, paddingLeft: '28px' }}  /* Отступ для подзадач */
               onClick={() => onFocusTask && onFocusTask(c.id)}
             >
-              {/* Вертикальная направляющая слева для визуальной вложенности */}
+              {/* Вертикальная направляющая слева */}
               <span className="absolute left-3 top-0 bottom-0 w-px bg-border pointer-events-none" />
               <div />
               <div className="min-w-0 py-1">
