@@ -136,7 +136,7 @@ const color = (task as any).color || '#4f46e5';
     >
       {/* Подпись родительского бара */}
       {asThinLine && (
-        <div className="absolute left-0 -top-5 whitespace-nowrap pointer-events-none font-semibold" style={{ color: labelColor }}>
+        <div className="absolute left-0 -top-5 whitespace-nowrap pointer-events-none font-medium text-sm" style={{ color: labelColor }}>
           {(task as any).name} {formatCompact((task as any).startDate)} - {formatCompact((task as any).endDate)}
         </div>
       )}
@@ -164,7 +164,7 @@ const color = (task as any).color || '#4f46e5';
         {/* Текст внутри неродительских баров */}
         {!asThinLine && (
           <div className="absolute inset-0 flex items-center justify-center px-2 pointer-events-none">
-            <span className="w-full truncate text-center text-white font-normal leading-none" title={(task as any).name}>
+            <span className="w-full truncate text-center text-white font-normal leading-none text-sm" title={(task as any).name}>
               {(task as any).name}
             </span>
           </div>
