@@ -27,3 +27,11 @@ export const getWeekStart = (date: Date): Date => {
 export const getMonthStart = (date: Date): Date => {
   return new Date(date.getFullYear(), date.getMonth(), 1);
 };
+
+export const formatCompact = (date: Date): string => {
+  const d = date instanceof Date ? date : new Date(date);
+  const day = d.getDate();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}.${month}.${year}`;
+};

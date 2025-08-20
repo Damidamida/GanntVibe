@@ -1,5 +1,6 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo,useRef,useState,useEffect } from 'react';
 import { Task } from '../types/gantt';
+import { formatCompact } from '../utils/dateUtils';
 
 const toLocalStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 const msPerDay = 24 * 60 * 60 * 1000;
@@ -48,8 +49,12 @@ const TaskBar: React.FC<Props> = ({
   }, [task.startDate, task.endDate, projectStartDate, dayWidth]);
 
   const barH = asThinLine ? Math.max(2, Math.round(rowHeight * 0.2)) : Math.round(rowHeight * 0.6);
-  const top = Math.max(0, Math.round((rowHeight - barH) / 2));
-  const color = (task as any).color || '#4f46e5';
+  const top = asThinLine ? Math.max(0, rowHeight - barH) : Math.max(0, Math.round((rowHeight - barH) / 2));
+const color = (task as any).color || '#4f46e5';
+
+  const barRef = useRef<HTMLDivElement | null>(null);
+  const [labelColor, setLabelColor] = useState<string>('');
+  useEffect(() => { if (barRef.current) { const bg = getComputedStyle(barRef.current).backgroundColor; setLabelColor(bg); } }, [color]);
 
   const [preview, setPreview] = useState<{ dx: number; dwLeft: number; dwRight: number }>({ dx: 0, dwLeft: 0, dwRight: 0 });
   const previewRef = useRef(preview);
@@ -129,9 +134,16 @@ const TaskBar: React.FC<Props> = ({
       className="absolute group"
       style={{ left: visualLeft, width: visualWidth, top, height: barH, zIndex: asThinLine ? 0 : 1 }}
     >
+      {/* Подпись родительского бара */}
+      {asThinLine && (
+        <div className="absolute left-0 -top-5 whitespace-nowrap pointer-events-none font-semibold" style={{ color: labelColor }}>
+          {(task as any).name} {formatCompact((task as any).startDate)} - {formatCompact((task as any).endDate)}
+        </div>
+      )}
       <div
         className={'relative rounded border shadow-sm ' + 'cursor-grab active:cursor-grabbing'}
         style={{ backgroundColor: color, height: '100%', borderColor: 'rgba(0,0,0,0.25)' }}
+        ref={barRef}
         title={(task as any).name}
         onMouseDown={startDrag('move')}
         onClick={() => {}}
@@ -149,6 +161,15 @@ const TaskBar: React.FC<Props> = ({
           onMouseDown={startDrag('resizeR')}
           onClick={(e) => e.stopPropagation()}
         />
+        {/* Текст внутри неродительских баров */}
+        {!asThinLine && (
+          <div className="absolute inset-0 flex items-center justify-center px-2 pointer-events-none">
+            <span className="w-full truncate text-center text-white font-normal leading-none" title={(task as any).name}>
+              {(task as any).name}
+            </span>
+          </div>
+        )}
+
       </div>
 
       {/* Боковые кружки — запуск связи (без '+').
