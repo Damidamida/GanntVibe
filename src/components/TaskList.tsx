@@ -60,7 +60,8 @@ export const TaskList: React.FC<TaskListProps> = ({
             style={{ height: rowHeight }}
             onClick={() => onFocusTask && onFocusTask(t.id)}
           >
-            <button
+            {childrenOf(t.id).length > 0 ? (
+<button
               className="p-1 rounded hover:bg-accent"
               onClick={(e) => { e.stopPropagation(); onToggleCollapse(t.id, !(t as any).isCollapsed); }}
               title={(t as any).isCollapsed ? 'Развернуть' : 'Свернуть'}
@@ -68,6 +69,8 @@ export const TaskList: React.FC<TaskListProps> = ({
             >
               {(t as any).isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </button>
+) : <span className="w-4 h-4" />}
+
 
             <div className="min-w-0 py-1">
               <div className="text-sm font-medium leading-none truncate">{t.name}</div>
@@ -184,7 +187,7 @@ export const TaskList: React.FC<TaskListProps> = ({
           )}
 
           {/* Quick add subtask button */}
-          {!(t as any).isCollapsed && (
+          {childrenOf(t.id).length > 0 && !(t as any).isCollapsed && (
             <div className="flex items-center" style={{ height: rowHeight, paddingLeft: '28px' }}>
               <Button variant="ghost" size="sm" onClick={() => setAddingSubParent(t.id)}>
                 <Plus className="w-4 h-4 mr-1" /> Добавить подзадачу
