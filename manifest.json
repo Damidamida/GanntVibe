@@ -1,0 +1,13 @@
+{
+  "expectedSha": "4d450f668c5b63f9d2270968abbafc353b460c47",
+  "files": [
+    {
+      "source": "delivery/payload/scripts/applyHelpers/updatePackageJson.mjs",
+      "target": "scripts/applyHelpers/updatePackageJson.mjs"
+    },
+    {
+      "source": "delivery/payload/src/components/FloatingAdd.tsx",
+      "target": "src/components/FloatingAdd.tsx"
+    }
+  ]
+}

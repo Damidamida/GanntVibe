@@ -115,7 +115,7 @@ export const GanttChart: React.FC<Props> = ({
       if (!(root as any).isCollapsed) {
         const kids = childrenByParent.get(root.id) || [];
         for (const k of kids) rows.push({ kind: 'task', task: k });
-        rows.push({ kind: 'addSub', parentId: root.id });
+        if (kids.length > 0) rows.push({ kind: 'addSub', parentId: root.id });
       }
     }
     for (const m of project.milestones || []) rows.push({ kind: 'milestone', milestone: m });
@@ -332,16 +332,7 @@ export const GanttChart: React.FC<Props> = ({
           className="sticky top-0 z-20 bg-background border-b flex items-center px-3"
           style={{ height: HEADER_HEIGHT }}
         >
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={handleDeleteAll}
-            disabled={project.tasks.length === 0}
-            className="uppercase tracking-wide"
-            title="Удалить все задачи"
-          >
-            <Trash2 className="w-4 h-4 mr-2" /> Удалить всё
-          </Button>
+          
         </div>
 
         <TaskList

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Project } from '../types/gantt';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { Edit3, Check, X } from 'lucide-react';
+import { Edit3, Check, X, Trash2 } from 'lucide-react';
 import type { TimelineUnit } from '../types/gantt';
 
 interface ProjectHeaderProps {
@@ -21,9 +21,17 @@ export const ProjectHeader: React.FC<ProjectHeaderProps> = ({ project, onUpdateP
     setIsEditing(false);
   };
 
-  return (
+  
+const handleDeleteAll = () => {
+  if (project.tasks.length === 0) return;
+  const ok = confirm('Удалить все задачи и подзадачи? Действие необратимо.');
+  if (!ok) return;
+  onUpdateProject({ ...project, tasks: [], dependencies: [] });
+};
+return (
     <header className="border-b bg-card">
-      <div className="max-w-screen-2xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
+      <div className="px-4 py-3 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
           {isEditing ? (
             <div className="flex items-center gap-2">
@@ -39,6 +47,17 @@ export const ProjectHeader: React.FC<ProjectHeaderProps> = ({ project, onUpdateP
               </Button>
             </div>
           )}
+        </div>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={handleDeleteAll}
+            disabled={project.tasks.length === 0}
+            className="ml-1 uppercase tracking-wide"
+            title="Удалить все задачи"
+          >
+            <Trash2 className="w-4 h-4 mr-2" /> Удалить всё
+          </Button>
         </div>
 
         <div className="flex items-center gap-4 text-sm text-muted-foreground">
